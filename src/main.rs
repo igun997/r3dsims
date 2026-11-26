@@ -7,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use r3dsims::client::Client;
 use r3dsims::gpu::{Gpu, SceneRenderer};
 use r3dsims::live::{Live, LiveOpts};
+use r3dsims::tiktok::TikTokOpts;
 use r3dsims::overlay::{Compositor, Overlay, Vars, parse_elements};
 use r3dsims::record::{RecordOpts, Recorder, preset_size, upscale_nearest};
 use r3dsims::story::Step;
@@ -72,6 +73,30 @@ enum Cmd {
         /// print the raw JSON
         #[arg(long)]
         json: bool,
+        #[command(flatten)]
+        conn: Conn,
+    },
+    /// Follow a TikTok LIVE account on a running `live`: `tiktok connect NAME`, `tiktok disconnect`, `tiktok status`.
+    Tiktok {
+        /// connect | disconnect | status
+        op: String,
+        /// account name, @handle or a TikTok URL (for connect)
+        name: Option<String>,
+        #[command(flatten)]
+        conn: Conn,
+    },
+    /// Video output of a running `live`: `output start --server rtmp://... --key KEY`, `output stop`, `output status`.
+    Output {
+        /// start | stop | status
+        op: String,
+        /// rtmp://, rtmps://, srt:// or udp:// address (TikTok calls it the Server URL)
+        #[arg(long)]
+        server: Option<String>,
+        /// stream key (TikTok gives a new one for every LIVE session)
+        #[arg(long, env = "R3D_STREAM_KEY", hide_env_values = true)]
+        key: Option<String>,
+        #[arg(long)]
+        bitrate: Option<u32>,
         #[command(flatten)]
         conn: Conn,
     },
@@ -252,6 +277,22 @@ struct LiveArgs {
     /// keep no history file
     #[arg(long)]
     no_history: bool,
+    /// follow this TikTok LIVE account (@name, name or URL): chat, gifts, likes and follows become events by themselves,
+    /// and it waits until the account is live and rejoins when the stream drops
+    #[arg(long, env = "R3D_TIKTOK")]
+    tiktok: Option<String>,
+    /// proxy for the TikTok connection: http://, https://, socks5:// (optionally user:pass@host:port)
+    #[arg(long, env = "R3D_TIKTOK_PROXY", hide_env_values = true)]
+    tiktok_proxy: Option<String>,
+    /// session cookies, only needed for 18+ rooms
+    #[arg(long, env = "R3D_TIKTOK_COOKIES", hide_env_values = true)]
+    tiktok_cookies: Option<String>,
+    /// seconds between "is it live yet?" checks while the account is offline
+    #[arg(long, default_value_t = 30)]
+    tiktok_poll: u64,
+    /// accept connections from other machines without --token (the dashboard can start a broadcast)
+    #[arg(long)]
+    allow_no_token: bool,
     /// stop after this many seconds (tests)
     #[arg(long)]
     seconds: Option<f32>,
@@ -688,6 +729,8 @@ fn cmd_live(a: LiveArgs) -> Result<()> {
         seconds: a.seconds,
         realtime: !a.no_realtime,
         log_events: a.log_events,
+        tiktok: TikTokOpts { username: a.tiktok, proxy: a.tiktok_proxy, cookies: a.tiktok_cookies, poll_secs: a.tiktok_poll },
+        allow_no_token: a.allow_no_token,
     })?;
     let st = live.run()?;
     eprintln!("final state: {}", st);
@@ -749,6 +792,24 @@ fn main() -> Result<()> {
         Cmd::Control { op, conn } => show(&conn.client()?, "POST", "/control", Some(&json!({"op": op}).to_string())),
         Cmd::State { conn } => show(&conn.client()?, "GET", "/state", None),
         Cmd::History { json, conn } => cmd_history(&conn.client()?, json),
+        Cmd::Tiktok { op, name, conn } => match op.as_str() {
+            "status" => show(&conn.client()?, "GET", "/tiktok", None),
+            "connect" => show(&conn.client()?, "POST", "/tiktok", Some(&json!({"op": "connect", "username": name.unwrap_or_default()}).to_string())),
+            "disconnect" => show(&conn.client()?, "POST", "/tiktok", Some(&json!({"op": "disconnect"}).to_string())),
+            other => bail!("tiktok: unknown op '{other}' (connect, disconnect, status)"),
+        },
+        Cmd::Output { op, server, key, bitrate, conn } => match op.as_str() {
+            "status" => show(&conn.client()?, "GET", "/output", None),
+            "stop" => show(&conn.client()?, "POST", "/output", Some(&json!({"op": "stop"}).to_string())),
+            "start" => {
+                let mut body = json!({"op": "start", "server": server.unwrap_or_default(), "key": key.unwrap_or_default()});
+                if let Some(b) = bitrate {
+                    body["bitrate"] = json!(b);
+                }
+                show(&conn.client()?, "POST", "/output", Some(&body.to_string()))
+            }
+            other => bail!("output: unknown op '{other}' (start, stop, status)"),
+        },
         Cmd::Biome { name, conn } => show(&conn.client()?, "POST", "/control", Some(&json!({"op": format!("biome:{name}")}).to_string())),
         Cmd::Step { json: j, conn } => show(&conn.client()?, "POST", "/command", Some(&read_source(&j)?)),
     }

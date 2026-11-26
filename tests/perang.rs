@@ -183,18 +183,16 @@ fn http(addr: &str, tok: Option<&str>) -> Client {
     Client::new(&format!("http://{addr}"), tok.map(str::to_string)).unwrap()
 }
 
-#[test]
-fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
-    let dir = project("live");
-    let live = Live::start(LiveOpts {
+fn opts(dir: &std::path::Path, listen: &str, token: Option<&str>) -> LiveOpts {
+    LiveOpts {
         war: dir.join("war.json"),
-        listen: "127.0.0.1:0".into(),
-        token: Some("secret".into()),
+        listen: listen.into(),
+        token: token.map(str::to_string),
         out_w: 480,
         out_h: 270,
         pixel: 2,
         clay: true,
-        history: Some(dir.join("sessions.jsonl")),
+        history: None,
         fps: 20,
         mjpeg: true,
         quality: 70,
@@ -204,8 +202,29 @@ fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
         seconds: Some(7.0),
         realtime: true,
         log_events: false,
-    })
-    .unwrap();
+        tiktok: r3dsims::tiktok::TikTokOpts::default(),
+        allow_no_token: false,
+    }
+}
+
+#[test]
+fn listening_beyond_this_machine_needs_a_token() {
+    let dir = project("guard");
+    let err = Live::start(opts(&dir, "0.0.0.0:0", None)).err().expect("refused").to_string();
+    assert!(err.contains("--token"), "{err}");
+    assert!(Live::start(opts(&dir, "0.0.0.0:0", Some("s"))).is_ok(), "a token is enough");
+    let mut open = opts(&dir, "0.0.0.0:0", None);
+    open.allow_no_token = true;
+    assert!(Live::start(open).is_ok(), "the explicit opt-out is honoured");
+    assert!(Live::start(opts(&dir, "[::1]:0", None)).is_ok() || Live::start(opts(&dir, "localhost:0", None)).is_ok(), "this machine only needs no token");
+}
+
+#[test]
+fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
+    let dir = project("live");
+    let mut o = opts(&dir, "127.0.0.1:0", Some("secret"));
+    o.history = Some(dir.join("sessions.jsonl"));
+    let live = Live::start(o).unwrap();
     let addr = live.addr().to_string();
     let runner = std::thread::spawn(move || live.run());
 
@@ -239,10 +258,39 @@ fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
     assert_eq!(code, 200);
     assert!(jpg.len() > 1000 && jpg.starts_with(&[0xFF, 0xD8]), "frame.jpg is {} bytes, starts {:?}", jpg.len(), &jpg[..jpg.len().min(4)]);
 
-    // the test panel is a page of its own; /view stays the bare picture for a browser source
-    assert!(anon.get("/test").unwrap().contains("r3dsims test panel"));
-    assert!(anon.get("/view?panel=1").unwrap().contains("r3dsims test panel"));
-    assert!(!anon.get("/view").unwrap().contains("test panel"));
+    // the dashboard is a page of its own; /view stays the bare picture for a browser source
+    assert!(anon.get("/dashboard").unwrap().contains("r3dsims dashboard"));
+    assert!(anon.get("/test").unwrap().contains("r3dsims dashboard"));
+    assert!(anon.get("/view?panel=1").unwrap().contains("r3dsims dashboard"));
+    assert!(!anon.get("/view").unwrap().contains("dashboard"));
+
+    // TikTok: idle until it is given an account, an empty name is refused, changing it needs the token
+    let tt: Value = serde_json::from_str(&anon.get("/tiktok").unwrap()).unwrap();
+    assert_eq!(tt["status"]["state"], json!("off"));
+    assert_eq!(tt["feed"], json!([]));
+    let (code, text) = me.request("POST", "/tiktok", Some(r#"{"op":"connect","username":"  "}"#)).unwrap();
+    assert_eq!(code, 400, "{text}");
+    let (code, _) = anon.request("POST", "/tiktok", Some(r#"{"op":"disconnect"}"#)).unwrap();
+    assert_eq!(code, 401);
+    let state: Value = serde_json::from_str(&anon.get("/state").unwrap()).unwrap();
+    assert_eq!(state["tiktok"]["state"], json!("off"));
+    assert_eq!(state["output"]["state"], json!("off"));
+
+    // video output: from the dashboard only network targets (a path would overwrite a file), and the key never comes back
+    let (code, text) = me.request("POST", "/output", Some(r#"{"op":"start","url":"/tmp/overwrite-me.mp4"}"#)).unwrap();
+    assert_eq!(code, 400);
+    assert!(text.contains("rtmp://"), "{text}");
+    if r3dsims::record::ffmpeg_available() {
+        let started = me.post("/output", r#"{"op":"start","server":"rtmp://127.0.0.1:1/live","key":"SUPERSECRET1234"}"#).unwrap();
+        assert!(!started.contains("SUPERSECRET"), "the key must not be echoed: {started}");
+        let started: Value = serde_json::from_str(&started).unwrap();
+        assert_eq!(started["output"]["target"], json!("rtmp://127.0.0.1:1/live/…1234"));
+        let status = anon.get("/output").unwrap();
+        assert!(!status.contains("SUPERSECRET"), "{status}");
+        me.post("/output", r#"{"op":"stop"}"#).unwrap();
+        let off: Value = serde_json::from_str(&anon.get("/output").unwrap()).unwrap();
+        assert!(off["state"] == json!("off") || off["target"] == json!(""), "{off}");
+    }
     // a finished round is written to the history and counted in the session
     me.post("/control", r#"{"op":"next_round"}"#).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(700));

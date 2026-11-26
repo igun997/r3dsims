@@ -7,11 +7,10 @@
 //!                    udp://, a file, or `-` for MPEG-TS on stdout)
 //!   * introspection: `GET /state`, `/hooks`, `/overlay`, `/health`
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -23,7 +22,9 @@ use crate::gpu::{Gpu, SceneRenderer};
 use crate::history::History;
 use crate::hud;
 use crate::overlay::{Compositor, Drawable};
-use crate::record::{ffmpeg_available, upscale_nearest};
+use crate::output::{Output, join_target};
+use crate::record::upscale_nearest;
+use crate::tiktok::{TikTok, TikTokOpts};
 use crate::war::{Event, Hooks, War};
 use crate::world::World;
 
@@ -50,6 +51,10 @@ pub struct LiveOpts {
     /// pace to wall-clock; false renders as fast as possible
     pub realtime: bool,
     pub log_events: bool,
+    /// TikTok LIVE account to follow from the start (the dashboard can change it while running)
+    pub tiktok: TikTokOpts,
+    /// accept connections from other machines without a token (the dashboard can start a broadcast, so this is refused by default)
+    pub allow_no_token: bool,
 }
 
 pub enum Msg {
@@ -58,6 +63,7 @@ pub enum Msg {
     Overlay(Value),
     Control(String),
     Command(String),
+    Output(Value),
 }
 
 pub struct Req {
@@ -172,6 +178,8 @@ struct Shared {
     overlay: Mutex<Value>,
     token: Option<String>,
     history: Option<Arc<History>>,
+    tiktok: TikTok,
+    output: Mutex<Value>,
     tx: Mutex<Sender<Req>>,
 }
 
@@ -199,8 +207,8 @@ auth: Authorization: Bearer TOKEN | X-Token: TOKEN | ?token=TOKEN (when --token 
 
 const VIEW: &str = "<!doctype html><meta charset=utf-8><title>r3dsims</title><style>html,body{margin:0;height:100%;background:#000}img{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}</style><img src=/stream.mjpg>";
 
-/// The test panel: the picture plus buttons for gifts, comments, controls, biomes and the history.
-const PANEL: &str = include_str!("panel.html");
+/// The dashboard: the picture and, beside it, the TikTok connection, the video output, the match, a test bench and the other streams.
+const DASHBOARD: &str = include_str!("dashboard.html");
 
 fn authorised(req: &Request, sh: &Shared, query: &str) -> bool {
     let Some(tok) = sh.token.as_deref() else { return true };
@@ -245,9 +253,11 @@ fn handle(mut req: Request, sh: Arc<Shared>) {
     let method = req.method().clone();
     let resp = match (&method, path) {
         (Method::Get, "/") => text_response(200, "text/html; charset=utf-8", INDEX.into()),
-        (Method::Get, "/view") if query.split('&').any(|q| q == "panel" || q == "test" || q.starts_with("panel=") || q.starts_with("test=")) => text_response(200, "text/html; charset=utf-8", PANEL.into()),
+        (Method::Get, "/view") if query.split('&').any(|q| q == "panel" || q == "test" || q.starts_with("panel=") || q.starts_with("test=")) => text_response(200, "text/html; charset=utf-8", DASHBOARD.into()),
         (Method::Get, "/view") => text_response(200, "text/html; charset=utf-8", VIEW.into()),
-        (Method::Get, "/test" | "/panel") => text_response(200, "text/html; charset=utf-8", PANEL.into()),
+        (Method::Get, "/dashboard" | "/test" | "/panel") => text_response(200, "text/html; charset=utf-8", DASHBOARD.into()),
+        (Method::Get, "/tiktok") => json_response(200, &sh.tiktok.snapshot()),
+        (Method::Get, "/output") => json_response(200, &sh.output.lock().map(|v| v.clone()).unwrap_or(Value::Null)),
         (Method::Get, "/history") => match &sh.history {
             Some(h) => json_response(200, &h.summary()),
             None => json_response(200, &json!({"enabled": false, "sessions": [], "totals": {}})),
@@ -276,7 +286,7 @@ fn handle(mut req: Request, sh: Arc<Shared>) {
             .with_header(header("Access-Control-Allow-Origin", "*"))
             .with_header(header("Access-Control-Allow-Headers", "authorization, content-type, x-token"))
             .with_header(header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")),
-        (Method::Post, "/webhook" | "/event" | "/events" | "/hooks" | "/overlay" | "/control" | "/command") => {
+        (Method::Post, "/webhook" | "/event" | "/events" | "/hooks" | "/overlay" | "/control" | "/command" | "/tiktok" | "/output") => {
             if !authorised(&req, &sh, query) {
                 let _ = req.respond(json_response(401, &json!({"ok": false, "error": "missing or wrong token"})));
                 return;
@@ -296,6 +306,23 @@ fn handle(mut req: Request, sh: Arc<Shared>) {
 
 fn route_post(sh: &Shared, path: &str, body: &str) -> (u16, Value) {
     let bad = |e: anyhow::Error| (400, json!({"ok": false, "error": format!("{e:#}")}));
+    if path == "/tiktok" {
+        let v: Value = match serde_json::from_str(body) {
+            Ok(v) => v,
+            Err(e) => return bad(anyhow!("tiktok JSON: {e}")),
+        };
+        return match v.get("op").and_then(Value::as_str).unwrap_or("connect") {
+            "connect" => match sh.tiktok.connect(v.get("username").and_then(Value::as_str).unwrap_or("")) {
+                Ok(()) => (200, json!({"ok": true})),
+                Err(e) => (400, json!({"ok": false, "error": e})),
+            },
+            "disconnect" => {
+                sh.tiktok.disconnect();
+                (200, json!({"ok": true}))
+            }
+            other => (400, json!({"ok": false, "error": format!("unknown tiktok op '{other}' (connect, disconnect)")})),
+        };
+    }
     let msg = match path {
         "/webhook" | "/event" | "/events" => match parse_events(body) {
             Ok(e) => Msg::Events(e),
@@ -313,83 +340,15 @@ fn route_post(sh: &Shared, path: &str, body: &str) -> (u16, Value) {
             let op = serde_json::from_str::<Value>(body).ok().and_then(|v| v.get("op").and_then(Value::as_str).map(str::to_string)).unwrap_or_else(|| body.trim().trim_matches('"').to_string());
             Msg::Control(op)
         }
+        "/output" => match serde_json::from_str::<Value>(body) {
+            Ok(v) => Msg::Output(v),
+            Err(e) => return bad(anyhow!("output JSON: {e}")),
+        },
         _ => Msg::Command(body.to_string()),
     };
     let v = ask(sh, msg);
     let ok = v.get("ok").and_then(Value::as_bool).unwrap_or(true);
     (if ok { 200 } else { 400 }, v)
-}
-
-// ---------------------------------------------------------------- ffmpeg out
-
-struct FfSink {
-    child: Child,
-    tx: Option<SyncSender<Arc<Vec<u8>>>>,
-    writer: Option<std::thread::JoinHandle<()>>,
-}
-
-impl FfSink {
-    fn start(target: &str, w: u32, h: u32, fps: u32, bitrate_k: u32) -> Result<FfSink> {
-        if !ffmpeg_available() {
-            bail!("--out needs ffmpeg in PATH");
-        }
-        let (ow, oh) = (w & !1, h & !1);
-        let mut cmd = Command::new("ffmpeg");
-        cmd.args(["-hide_banner", "-loglevel", "warning", "-use_wallclock_as_timestamps", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s"])
-            .arg(format!("{w}x{h}"))
-            .args(["-i", "-", "-vf"])
-            .arg(format!("scale={ow}:{oh},format=yuv420p"))
-            .args(["-r"])
-            .arg(fps.to_string())
-            .args(["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-g"])
-            .arg((fps * 2).to_string())
-            .args(["-b:v"])
-            .arg(format!("{bitrate_k}k"))
-            .args(["-maxrate"])
-            .arg(format!("{bitrate_k}k"))
-            .args(["-bufsize"])
-            .arg(format!("{}k", bitrate_k * 2));
-        let lower = target.to_ascii_lowercase();
-        if target == "-" {
-            cmd.args(["-f", "mpegts", "pipe:1"]);
-            cmd.stdout(Stdio::inherit());
-        } else if lower.starts_with("rtmp://") || lower.starts_with("rtmps://") {
-            cmd.args(["-f", "flv", target]);
-            cmd.stdout(Stdio::null());
-        } else if lower.starts_with("srt://") || lower.starts_with("udp://") || lower.starts_with("tcp://") || lower.starts_with("rtp://") {
-            cmd.args(["-f", "mpegts", target]);
-            cmd.stdout(Stdio::null());
-        } else {
-            cmd.args(["-y", "-movflags", "+faststart", target]);
-            cmd.stdout(Stdio::null());
-        }
-        cmd.stdin(Stdio::piped()).stderr(Stdio::inherit());
-        let mut child = cmd.spawn().context("spawn ffmpeg")?;
-        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("ffmpeg stdin"))?;
-        let (tx, rx) = mpsc::sync_channel::<Arc<Vec<u8>>>(3);
-        let writer = std::thread::spawn(move || {
-            while let Ok(frame) = rx.recv() {
-                if stdin.write_all(&frame).is_err() {
-                    break;
-                }
-            }
-        });
-        Ok(FfSink { child, tx: Some(tx), writer: Some(writer) })
-    }
-
-    fn push(&self, frame: &Arc<Vec<u8>>) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(frame.clone());
-        }
-    }
-
-    fn finish(mut self) {
-        drop(self.tx.take());
-        if let Some(w) = self.writer.take() {
-            let _ = w.join();
-        }
-        let _ = self.child.wait();
-    }
 }
 
 // ---------------------------------------------------------------- the stream
@@ -403,6 +362,7 @@ pub struct Live {
     addr: SocketAddr,
     base_dir: PathBuf,
     history: Option<Arc<History>>,
+    output: Output,
 }
 
 impl Live {
@@ -417,9 +377,22 @@ impl Live {
             Arc::new(History::open(p, st["title"].as_str().unwrap_or(""), pair))
         });
         let base_dir = opts.war.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        if opts.token.as_deref().is_none_or(str::is_empty) && !opts.allow_no_token && !listen_is_loopback(&opts.listen) {
+            bail!("--listen {} reaches other machines but there is no --token: the dashboard can start a broadcast and change the stream. Add --token SECRET (or --allow-no-token to accept the risk).", opts.listen);
+        }
+        let output = Output::new(opts.out_w, opts.out_h, opts.fps.max(1));
         let server = Server::http(&opts.listen).map_err(|e| anyhow!("listen on {}: {e}", opts.listen))?;
         let addr = server.server_addr().to_ip().ok_or_else(|| anyhow!("server has no IP address"))?;
         let (tx, rx) = mpsc::channel();
+        // the TikTok connector hands its events to the simulation like a webhook does, without waiting for an answer
+        let sink_tx = Arc::new(Mutex::new(tx.clone()));
+        let sink: crate::tiktok::Sink = Arc::new(move |events| {
+            let (reply, _answer) = mpsc::channel();
+            if let Ok(tx) = sink_tx.lock() {
+                let _ = tx.send(Req { msg: Msg::Events(events), reply });
+            }
+        });
+        let tiktok = TikTok::start(opts.tiktok.clone(), sink);
         let shared = Arc::new(Shared {
             hub: FrameHub::new(opts.quality.clamp(10, 100)),
             state: Mutex::new(war.state_json()),
@@ -427,6 +400,8 @@ impl Live {
             overlay: Mutex::new(json!([])),
             token: opts.token.clone().filter(|t| !t.is_empty()),
             history: history.clone(),
+            tiktok,
+            output: Mutex::new(json!({"state": "off"})),
             tx: Mutex::new(tx),
         });
         let sh = shared.clone();
@@ -436,11 +411,39 @@ impl Live {
                 std::thread::spawn(move || handle(req, sh));
             }
         });
-        Ok(Live { opts, world, war, shared, rx, addr, base_dir, history })
+        Ok(Live { opts, world, war, shared, rx, addr, base_dir, history, output })
     }
 
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// `{"op":"start","server":"rtmp://...","key":"...","bitrate":3500}` (or `"url"`), `{"op":"stop"}`, `{"op":"status"}`.
+    /// From the dashboard only network targets are accepted: a file path would let a remote client overwrite files.
+    fn output_cmd(&mut self, v: &Value) -> Value {
+        let op = v.get("op").and_then(Value::as_str).unwrap_or("start");
+        match op {
+            "start" => {
+                let target = match v.get("url").and_then(Value::as_str) {
+                    Some(u) if !u.trim().is_empty() => u.trim().to_string(),
+                    _ => join_target(v.get("server").and_then(Value::as_str).unwrap_or(""), v.get("key").and_then(Value::as_str).unwrap_or("")),
+                };
+                let lower = target.to_ascii_lowercase();
+                if !["rtmp://", "rtmps://", "srt://", "udp://", "tcp://", "rtp://"].iter().any(|s| lower.starts_with(s)) {
+                    return json!({"ok": false, "error": "the target must start with rtmp://, rtmps://, srt://, udp://, tcp:// or rtp:// (files and stdout are set with --out at start)"});
+                }
+                let bitrate = v.get("bitrate").and_then(Value::as_u64).map_or(self.opts.bitrate_k, |b| b.min(u64::from(u32::MAX)) as u32);
+                if let Err(e) = self.output.start(&target, bitrate) {
+                    return json!({"ok": false, "error": format!("{e:#}")});
+                }
+            }
+            "stop" => self.output.stop(),
+            "status" => {}
+            other => return json!({"ok": false, "error": format!("unknown output op '{other}' (start, stop, status)")}),
+        }
+        let st = self.output.status();
+        *self.shared.output.lock().unwrap_or_else(|e| e.into_inner()) = st.clone();
+        json!({"ok": true, "output": st})
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Value {
@@ -483,6 +486,7 @@ impl Live {
                 Ok(()) => json!({"ok": true}),
                 Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
             },
+            Msg::Output(v) => self.output_cmd(&v),
         }
     }
 
@@ -495,15 +499,14 @@ impl Live {
         eprintln!("gpu: {}", gpu.adapter);
         let mut renderer = SceneRenderer::new(&gpu.device, &gpu.queue, rw as u32, rh as u32);
         let mut comp = Compositor::new(self.base_dir.clone(), self.opts.emoji_dir.clone());
-        let sink = match &self.opts.out {
-            Some(t) => Some(FfSink::start(t, ow as u32, oh as u32, self.opts.fps, self.opts.bitrate_k)?),
-            None => None,
-        };
+        if let Some(t) = self.opts.out.clone() {
+            self.output.start(&t, self.opts.bitrate_k)?;
+        }
         let fps = self.opts.fps.max(1);
         let base_dt = 1.0 / fps as f32;
         let frame_len = Duration::from_secs_f32(base_dt);
         eprintln!(
-            "live: {}x{} (render {}x{}) @ {} fps, listening on http://{}  [view: /view, test panel: /test, webhook: POST /webhook]",
+            "live: {}x{} (render {}x{}) @ {} fps, listening on http://{}  [picture: /view, dashboard: /dashboard, webhook: POST /webhook]",
             ow, oh, rw, rh, fps, self.addr
         );
         let started = Instant::now();
@@ -527,6 +530,7 @@ impl Live {
                 let v = self.handle_msg(req.msg);
                 let _ = req.reply.send(v);
             }
+            self.output.poll();
             self.war.update(dt, &mut self.world);
             for ev in self.war.take_log() {
                 if let Some(h) = &self.history {
@@ -556,9 +560,7 @@ impl Live {
             drop(items);
             let t3 = Instant::now();
             let frame = Arc::new(frame);
-            if let Some(s) = &sink {
-                s.push(&frame);
-            }
+            self.output.push(&frame);
             if self.opts.mjpeg {
                 self.shared.hub.publish(frame, ow, oh);
             }
@@ -587,6 +589,10 @@ impl Live {
                 let mut st = self.war.state_json();
                 st["time"] = json!((sim * 10.0).round() / 10.0);
                 st["perf"] = perf.clone();
+                st["tiktok"] = serde_json::to_value(self.shared.tiktok.status()).unwrap_or(Value::Null);
+                let out = self.output.status();
+                *self.shared.output.lock().unwrap_or_else(|e| e.into_inner()) = out.clone();
+                st["output"] = out;
                 *self.shared.state.lock().unwrap_or_else(|e| e.into_inner()) = st;
                 *self.shared.overlay.lock().unwrap_or_else(|e| e.into_inner()) = serde_json::to_value(self.war.overlay.list()).unwrap_or(Value::Null);
             }
@@ -604,11 +610,15 @@ impl Live {
                 }
             }
         }
-        if let Some(s) = sink {
-            s.finish();
-        }
+        self.output.finish();
         let mut st = self.war.state_json();
         st["time"] = json!(sim);
         Ok(st)
     }
+}
+
+/// `host:port`, `[::1]:port`, `localhost:port`: does the listen address stay on this machine?
+fn listen_is_loopback(listen: &str) -> bool {
+    let host = listen.rsplit_once(':').map_or(listen, |(h, _)| h).trim_matches(['[', ']']);
+    host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }

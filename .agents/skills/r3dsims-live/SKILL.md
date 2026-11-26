@@ -1,6 +1,6 @@
 ---
 name: r3dsims-live
-description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by webhooks: gifts, likes and comments become effects, ultimates get a camp point-of-view camera with their own effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state. The platform connector is a separate app.
+description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by TikTok LIVE or webhooks: the built-in TikTok connector, the dashboard, going live over RTMP from Linux, gifts, likes and comments become effects, ultimates get a camp point-of-view camera with their own effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state and wins/losses.
 ---
 
 # r3dsims live
@@ -16,6 +16,7 @@ r3dsims template demo -o demo            # or `perang`: kingdoms at war. scene +
 r3dsims validate demo/war.json           # every reference checked, a whole match played headless
 r3dsims live demo/war.json --token SECRET --log-events          # picture: http://127.0.0.1:8787/view
 r3dsims live demo/war.json --out rtmp://HOST/app/KEY            # also push H.264 (needs ffmpeg)
+r3dsims live demo/war.json --token SECRET --tiktok @username     # follow a TikTok LIVE room; dashboard at /dashboard
 ```
 
 All other commands take `--server http://HOST:8787 --token SECRET` (or `R3D_SERVER`, `R3D_TOKEN`).
@@ -27,7 +28,9 @@ Look: clay by default (`--style clay`, smooth hand-made figures, soft light, no 
 | --- | --- |
 | simulate what the connector sends | `r3dsims send gift Rose --user Budi --count 3` · `send like 30` · `send comment "rakyat"` · `send --json '{...}'` |
 | see the match | `r3dsims state` (phase, round, support/HP, winner, biome, autopilot, cinematic, macros, top supporters) |
-| try it without typing | open `http://HOST:8787/test` (buttons for gifts, events, controls, biomes, run any macro, viewer simulator, score + history) |
+| dashboard | open `http://HOST:8787/dashboard` (`?token=SECRET`): tabs Siaran (TikTok, video output, score, match, history), Uji coba (gift buttons, events, run any macro, viewer simulator), Stream lain (other servers) |
+| TikTok connector | `live --tiktok @name [--tiktok-proxy socks5://...] [--tiktok-poll 30]` · `r3dsims tiktok status\|connect @name\|disconnect` · waits until live, rejoins by itself; private protocol, may refuse datacenter IPs (use a proxy) |
+| go live from Linux | get Server URL + Stream key at livecenter.tiktok.com (new every session) · `r3dsims output start --server rtmp://... --key KEY [--bitrate 3500]` · `output stop\|status` · key is never echoed back; restarts ffmpeg itself |
 | wins and losses | `r3dsims history` (every session, from `sessions.jsonl`; `--history FILE`, `--no-history`); `state.session` for the running one |
 | rounds | `r3dsims control start\|next_round\|reset\|stop\|pause\|resume\|biome:NAME\|run:NAME[:SIDE]` |
 | world theme | `r3dsims biome malam` (any key of `biomes`, or `random`) |
@@ -89,6 +92,8 @@ is deliberately light so viewers keep the picture. Emoji (`🌹` or `:rose:`) wo
 `{ticker.1}`, `{top1}`, `{user}` (inside trigger overlays), `{var.NAME}`.
 
 ## Checks and trouble
+
+Notes for a Linux server: listening beyond localhost needs `--token`; without a GPU rendering is software (llvmpipe) and measured only 6-13 fps at 720x1280, so broadcast from a machine with a Vulkan GPU. Details in `docs/LIVE.md`.
 
 * Always `r3dsims validate war.json` after editing the file; for a running stream read the `hook publish` answer.
 * Webhook answered `401`: token. `ignored: lobby`: events only count while a round is fought (the lobby starts by itself).

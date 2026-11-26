@@ -750,7 +750,7 @@ pub struct Autopilot {
 
 /// A viewer event as the connector app delivers it. `from_json` also reads the common platform
 /// spellings (`uniqueId`, `nickname`, `giftName`, `repeatCount`, `diamondCount`, `comment`).
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Event {
     #[serde(rename = "type", default = "d_kind")]
     pub kind: String,

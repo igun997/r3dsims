@@ -29,10 +29,12 @@ r3dsims state                           # round, support, winner, biome, macros,
 r3dsims history                         # wins and losses of every session
 ```
 
-No typing needed to try it: open **`http://127.0.0.1:8787/test`** (or `/view?panel=1`). The picture on the left, on the right
-buttons for every gift of the war, like / follow / share / join / comment, a "run any action or macro" box, match
-controls (start, pause, next round, reset), biome buttons, a random-viewer simulator, the score of this session and the history
-table. If `live` runs with `--token`, open `/test?token=SECRET`. `/view` stays the bare picture, so it is safe as a browser source.
+No typing needed to try it: open **`http://127.0.0.1:8787/dashboard`** (older links `/test` and `/view?panel=1` open the same page). The
+picture on the left; on the right three tabs. **Siaran**: the TikTok connection, the video output, the score of this session, the
+match controls and the history table. **Uji coba**: buttons for every gift of the war, like / follow / share / join / comment, a
+"run any action or macro" box, biome buttons and a random-viewer simulator. **Stream lain**: the state of other `r3dsims live`
+servers (other ports or machines) next to this one. If `live` runs with `--token`, open `/dashboard?token=SECRET`. `/view` stays the
+bare picture, so it is safe as a browser source.
 
 Picture out:
 
@@ -57,6 +59,81 @@ outlines), so units, castles, trees and your own assets need no redrawing. The i
 `--style voxel` brings back the blocky cube look. `render` takes the same flag (default `voxel`).
 For a portrait (TikTok) stream send a camera command once: `r3dsims step '{"op":"set","yaw":90,"zoom":46}'`.
 
+## TikTok: the built-in connector, going live from Linux, the dashboard
+
+`r3dsims live` can read a TikTok LIVE room by itself, so no separate connector app is needed:
+
+```
+r3dsims live demo/war.json --tiktok @username      # or R3D_TIKTOK=@username
+r3dsims tiktok status                              # state, viewers, likes, events per minute, last events
+r3dsims tiktok connect @other | disconnect         # change the account while running
+```
+
+Give it an account once. It waits until the account is live (checks every `--tiktok-poll` seconds, default 30), joins the room,
+and on its own rejoins when the connection drops, the stream ends or the account goes live again. The dashboard shows the state
+(`menunggu akun live`, `tersambung`, `menyambung ulang`, `galat`), the number of viewers, the total likes, the events per minute
+and the latest chat and gifts. Accounts can be written as `@name`, `name` or a TikTok URL.
+
+| TikTok | becomes the webhook event |
+| --- | --- |
+| chat message | `comment` (`text`, `user` = the viewer's nickname) |
+| gift | `gift` with `gift` = TikTok's English name (`Rose`, `Galaxy`, ...), `count` = the final streak length, `diamonds` = per gift. A combo is reported once, when the streak ends |
+| likes | `like`, one event per viewer every 250 ms with the summed `count` |
+| viewer joins | `join` (at most 6 a second; the rest are counted as dropped) |
+| follow, share | `follow`, `share` |
+
+Chat is capped at 25 a second. Every message is delivered once (TikTok's message id), and `events_seen`, the supporters board and the
+triggers treat these events exactly like webhook ones. Use `gift_aliases` in `war.json` for other names. Language is fixed to English
+so gift names stay the same whatever the machine's locale.
+
+Read this before relying on it:
+
+* It uses TikTok's **private web protocol**, not an official API. TikTok can change it at any time (it did while this was built: the
+  anonymous `ttwid` cookie moved from the home page to `/live`, which broke the upstream library; `crates/tiktok-live` is that library,
+  patched, see its `NOTICE.md`). Check TikTok's terms for your use.
+* It only **reads**. It cannot send chat or act on the room, and there is no way to resume: events are missed while reconnecting.
+* TikTok may refuse **datacenter IPs**. The status then shows `galat` with a hint. Use `--tiktok-proxy socks5://user:pass@host:1080`
+  (`http://` and `https://` work too) or run from a home network. Room lookups from a VPS worked in testing; the WebSocket from a VPS
+  was not tried.
+* `--tiktok-cookies "sessionid=...; sid_tt=..."` is only needed for 18+ rooms.
+
+### Going live to TikTok from Linux
+
+TikTok LIVE Studio exists only for Windows and macOS. On Linux the picture goes out as plain RTMP, which `r3dsims` already can do.
+TikTok gives a **new Server URL and Stream key for every LIVE session**, so the output can be started, replaced and stopped while the
+war keeps running, no restart needed:
+
+1. In a browser, open `livecenter.tiktok.com`, start the LIVE and copy the Server URL and the Stream key (only accounts that TikTok
+   granted LIVE access and the stream key option see them).
+2. Paste both into the dashboard card **Siaran ke TikTok** and press **Mulai siaran**, or run
+   `r3dsims output start --server rtmp://... --key KEY` (`R3D_STREAM_KEY` also works). Stop with **Stop** / `output stop`.
+3. The key is never shown again (the card shows `rtmp://host/app/…1234`) and is not stored.
+
+If ffmpeg dies (network drop) it is restarted after 3 seconds, at most 6 times a minute, then the card says the key may be used up.
+The dashboard only accepts `rtmp://`, `rtmps://`, `srt://`, `udp://`, `tcp://` and `rtp://` targets, because a file path would let a remote
+client overwrite files; files and stdout stay available through `--out` at start. Use `--preset live` (720x1280) for the vertical picture and
+`--bitrate 2500..4000` (kbit/s). `r3dsims output status` and `/output` report the state, uptime and restarts.
+
+### Running it on a Linux server
+
+```
+# needs: ffmpeg, and Vulkan. Without a GPU install mesa's software driver (apt: mesa-vulkan-drivers) - it works but is slow
+r3dsims live demo/war.json --preset live --pixel 2 --listen 0.0.0.0:8787 --token CHANGE-ME \
+  --tiktok @username --tiktok-proxy socks5://user:pass@host:1080
+```
+
+* Listening beyond this machine **requires `--token`** (the dashboard can start a broadcast and change the stream); `--allow-no-token`
+  accepts the risk. There is no TLS: put it behind a reverse proxy (Caddy, nginx) or an SSH tunnel for anything public.
+* A systemd service: `ExecStart=/usr/local/bin/r3dsims live /srv/war/war.json --preset live --listen 127.0.0.1:8787 --token ...`,
+  `Restart=always`, `Environment=R3D_TIKTOK=@username`; open `/dashboard?token=...` through the tunnel.
+* Several streams: run one `r3dsims live` per stream on its own port (`--listen`), each with its own `war.json` / history file, and watch
+  them all in the **Stream lain** tab of any dashboard.
+* **Speed without a GPU is the real limit.** Measured on a 14-vCPU AMD EPYC VPS rendering with mesa's `llvmpipe`, the 720x1280 vertical
+  picture ran at roughly 6 to 13 fps (it varied a lot between runs, voxel was not clearly faster than clay, and neither `--pixel 3`/`4`
+  nor a smaller shadow map helped reliably), against 24 to 30 fps on a laptop's integrated GPU. A machine with any Vulkan GPU, or a
+  home PC, is the safe place to broadcast from; a GPU-less server is fine for testing, the dashboard, the connector and the history.
+  `r3dsims state` shows the real fps (`perf`), and the dashboard shows it in its header.
+
 ## Webhook contract (what the connector sends)
 
 `POST /webhook`, body = one event, an array, or `{"events": [...]}`. Auth when `--token SECRET` is set:
@@ -77,10 +154,12 @@ For a portrait (TikTok) stream send a camera command once: `r3dsims step '{"op":
 * Gift names ignore case, spaces, `_` and `-` (`Finger Heart` = `finger_heart`). `gift_aliases` maps
   local names (`"mawar": "rose"`).
 
-Other endpoints: `GET /state`, `GET /hooks`, `GET /overlay`, `GET /history`, `GET /health`, `GET /test` (the test panel),
-`POST /hooks`, `POST /overlay`, `POST /control`, `POST /command` (any story/camera step). `r3dsims
-send|hook|overlay|control|state|history|step` wrap them (`--server http://host:8787`, `--token`, or `R3D_SERVER` /
-`R3D_TOKEN`).
+Other endpoints: `GET /state` (also carries `tiktok`, `output` and `session`), `GET /hooks`, `GET /overlay`, `GET /history`, `GET /health`,
+`GET /dashboard` (`/test` and `/view?panel=1` are the same page), `GET /tiktok` (connector status and the latest events), `GET /output`
+(video output status, key masked), `POST /hooks`, `POST /overlay`, `POST /control`, `POST /command` (any story/camera step),
+`POST /tiktok` (`{"op":"connect","username":"@name"}` / `{"op":"disconnect"}`), `POST /output` (`{"op":"start","server":"rtmp://...",
+"key":"..."}` / `{"op":"stop"}`). `r3dsims send|hook|overlay|control|state|history|tiktok|output|step` wrap them (`--server
+http://host:8787`, `--token`, or `R3D_SERVER` / `R3D_TOKEN`).
 
 ### Wins and losses per session
 
@@ -342,6 +421,5 @@ Common: `id`, `at`, `anchor` (`center`, `top-left`, `top`, `bottom`...), `offset
   reverse proxy for anything public.
 * Bodies over 1 MB are cut; one simulation thread owns the state, so requests are applied in order.
 * `max_units` caps soldiers per side; macros are capped (400 steps per tick, depth 24, 64 at a time).
-* The picture is rendered at the configured size on the server's GPU (Vulkan, Metal, DX12; lavapipe works
-  but slowly). The simulation steps at a fixed 1/fps, so a slow machine plays in slow motion instead of
-  skipping.
+* The picture is rendered at the configured size on the server's GPU (Vulkan, Metal, DX12). In real time the world follows the wall
+  clock, so a machine that cannot keep up drops frames instead of playing in slow motion. `r3dsims state` shows the measured fps.

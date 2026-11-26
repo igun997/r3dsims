@@ -9,7 +9,7 @@ readme = "README.md"
 
 [workspace]
 resolver = "3"
-members = [".", "crates/live"]
+members = [".", "crates/live", "crates/tiktok-live"]
 default-members = ["."]
 
 [dependencies]
@@ -26,6 +26,8 @@ ab_glyph = "0.2"
 jpeg-encoder = "0.7"
 resvg = "0.50"
 tiny_http = "0.12"
+tiktok-live = { path = "crates/tiktok-live" }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
 wgpu = { version = "~30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

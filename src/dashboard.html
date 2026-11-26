@@ -1,0 +1,565 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>r3dsims dashboard</title>
+<style>
+  :root { --bg:#14161a; --card:#1d2026; --line:#2c313a; --fg:#e6e8eb; --mute:#8b93a1; --acc:#f2a31b; --a:#f2a31b; --b:#4a86d8; --ok:#4cc38a; --bad:#ef5b5b; --warn:#e9b44c; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.4 system-ui,sans-serif; }
+  #app { display:flex; height:100%; }
+  #view { flex:1; min-width:0; background:#000; display:flex; align-items:center; justify-content:center; }
+  #view img { max-width:100%; max-height:100%; object-fit:contain; }
+  #side { width:430px; max-width:48vw; overflow-y:auto; padding:10px; border-left:1px solid var(--line); }
+  h2 { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--mute); margin:14px 0 6px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:6px; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .grow { flex:1; min-width:110px; }
+  button { background:#262b33; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 9px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--acc); }
+  button:active { transform:translateY(1px); }
+  button.go { background:#25402f; border-color:#2f5d41; }
+  button.stop { background:#432526; border-color:#6a3335; }
+  button.gift { text-align:left; flex:1 1 46%; }
+  button.gift small { color:var(--mute); display:block; }
+  input,select { background:#101216; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 7px; font:inherit; max-width:100%; }
+  input[type=number] { width:78px; }
+  input[type=checkbox] { vertical-align:middle; }
+  .chip { background:#101216; border:1px solid var(--line); border-radius:99px; padding:2px 9px; color:var(--mute); }
+  .chip b { color:var(--fg); font-weight:600; }
+  .badge { border-radius:99px; padding:2px 10px; font-weight:600; background:#2c313a; }
+  .badge.ok { background:#1f4a35; color:#8ff0c0; } .badge.warn { background:#4a3d1a; color:#ffd57a; } .badge.bad { background:#4a2224; color:#ff9a9a; }
+  .bar { height:8px; background:#101216; border-radius:4px; overflow:hidden; margin:3px 0; }
+  .bar i { display:block; height:100%; transition:width .3s; }
+  .name { display:flex; justify-content:space-between; gap:6px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td,th { padding:3px 4px; border-bottom:1px solid var(--line); text-align:left; }
+  th { color:var(--mute); font-weight:500; }
+  tr.cur td { color:var(--acc); }
+  .hint { color:var(--mute); font-size:12px; }
+  .err { color:var(--bad); font-size:12px; margin-top:4px; word-break:break-word; }
+  .tip { color:var(--warn); font-size:12px; margin-top:4px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin-top:6px; }
+  .kv span:nth-child(odd) { color:var(--mute); }
+  #tabs { display:flex; gap:4px; margin-bottom:4px; position:sticky; top:0; background:var(--bg); padding:2px 0 6px; z-index:2; }
+  #tabs button { flex:1; border-radius:6px 6px 0 0; }
+  #tabs button.on { border-color:var(--acc); background:#2b2f37; }
+  .tab { display:none; } .tab.on { display:block; }
+  #feed { max-height:170px; overflow:auto; font-size:12px; }
+  #feed div { padding:1px 0; border-bottom:1px solid #22262d; word-break:break-word; }
+  #feed .k { color:var(--mute); margin-right:6px; }
+  #feed .gift { color:var(--acc); }
+  #log { height:120px; overflow:auto; font:12px/1.35 ui-monospace,monospace; color:var(--mute); }
+  #log .bad { color:var(--bad); } #log .ok { color:var(--ok); }
+  .peer a { color:#8cb8ff; }
+  @media (max-width:800px) { #app { flex-direction:column; } #side { width:auto; max-width:none; height:60%; border-left:0; border-top:1px solid var(--line); } }
+</style>
+<div id="app">
+  <div id="view"><img id="pic" src="/stream.mjpg" alt="stream"></div>
+  <div id="side">
+    <div class="row" id="chips"></div>
+    <div id="tabs">
+      <button data-tab="siaran" class="on">Siaran</button>
+      <button data-tab="uji">Uji coba</button>
+      <button data-tab="streams">Stream lain</button>
+    </div>
+
+    <!-- ============================================================ SIARAN -->
+    <div class="tab on" id="tab-siaran">
+      <h2>TikTok (penonton masuk lewat sini)</h2>
+      <div class="card">
+        <div class="row">
+          <input id="ttUser" class="grow" type="text" placeholder="@username TikTok yang live" autocomplete="off">
+          <button id="ttConnect" class="go">Sambung</button>
+          <button id="ttDisconnect">Putus</button>
+          <span id="ttBadge" class="badge">-</span>
+        </div>
+        <div class="kv" id="ttInfo"></div>
+        <div class="err" id="ttErr"></div>
+        <div class="tip" id="ttHint"></div>
+        <div class="hint" style="margin-top:6px">Sekali diisi, sistem menunggu akun itu live, masuk ke room, dan menyambung ulang sendiri kalau putus atau live lagi.</div>
+        <div id="feed" style="margin-top:6px"></div>
+      </div>
+
+      <h2>Siaran ke TikTok (video keluar)</h2>
+      <div class="card">
+        <div class="row">
+          <input id="outServer" class="grow" type="text" placeholder="Server URL (rtmp://...)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="row" style="margin-top:6px">
+          <input id="outKey" class="grow" type="password" placeholder="Stream key (baru tiap sesi LIVE)" autocomplete="off" spellcheck="false">
+          <input id="outBitrate" type="number" min="300" max="20000" step="100" value="3500" title="kbit/s">
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="outStart" class="go">Mulai siaran</button>
+          <button id="outStop" class="stop">Stop</button>
+          <span id="outBadge" class="badge">-</span>
+        </div>
+        <div class="kv" id="outInfo"></div>
+        <div class="err" id="outErr"></div>
+        <div class="hint" style="margin-top:6px">Linux tidak punya TikTok LIVE Studio. Buka livecenter.tiktok.com, mulai LIVE, salin Server URL dan Stream key, tempel di sini lalu Mulai. TikTok membuat key baru tiap sesi; tempel yang baru tiap kali, tanpa me-restart stream. Key tidak disimpan dan tidak ditampilkan lagi.</div>
+      </div>
+
+      <h2>Skor</h2>
+      <div class="card" id="score"></div>
+
+      <h2>Match</h2>
+      <div class="card row">
+        <button class="go" data-ctl="start">start</button>
+        <button data-ctl="pause">pause</button>
+        <button data-ctl="resume">resume</button>
+        <button data-ctl="next_round">ronde berikut</button>
+        <button class="stop" data-ctl="reset">reset</button>
+        <button class="stop" data-ctl="stop">stop</button>
+      </div>
+
+      <h2>Riwayat sesi (menang / kalah)</h2>
+      <div class="card" id="history">memuat...</div>
+    </div>
+
+    <!-- ============================================================ UJI COBA -->
+    <div class="tab" id="tab-uji">
+      <h2>Pengirim</h2>
+      <div class="card row">
+        <label>nama <input id="user" type="text" value="Tester" style="width:110px"></label>
+        <label>jumlah <input id="count" type="number" min="1" value="1"></label>
+        <label>kubu <select id="sideSel"><option value="">otomatis</option></select></label>
+      </div>
+
+      <h2>Gift</h2>
+      <div class="row" id="gifts"></div>
+
+      <h2>Event lain</h2>
+      <div class="card row">
+        <button data-ev="like">like x10</button>
+        <button data-ev="follow">follow</button>
+        <button data-ev="share">share</button>
+        <button data-ev="join">join</button>
+        <button data-ev="subscribe">subscribe</button>
+        <input id="comment" type="text" class="grow" placeholder="komentar...">
+        <button id="sendComment">kirim</button>
+      </div>
+
+      <h2>Jalankan langsung (aksi / makro)</h2>
+      <div class="card row">
+        <select id="runName" class="grow"></select>
+        <select id="runSide" style="min-width:110px"></select>
+        <button id="run">jalankan</button>
+      </div>
+      <div class="hint">Perlu ronde yang sedang berjalan.</div>
+
+      <h2>Biome</h2>
+      <div class="card row" id="biomes"></div>
+
+      <h2>Simulasi penonton</h2>
+      <div class="card row">
+        <label><input id="sim" type="checkbox"> kirim event acak</label>
+        <label>tiap <input id="simEvery" type="number" min="0.3" step="0.1" value="1.5"> detik</label>
+      </div>
+
+      <h2>Log</h2>
+      <div class="card" id="log"></div>
+    </div>
+
+    <!-- ============================================================ STREAM LAIN -->
+    <div class="tab" id="tab-streams">
+      <h2>Semua stream</h2>
+      <div id="peers"></div>
+      <h2>Tambah server</h2>
+      <div class="card row">
+        <input id="peerName" type="text" placeholder="nama" style="width:100px">
+        <input id="peerUrl" type="text" class="grow" placeholder="http://alamat:8787">
+        <input id="peerToken" type="password" placeholder="token (untuk tautan)" style="width:120px">
+        <button id="peerAdd" class="go">Tambah</button>
+      </div>
+      <div class="hint">Tiap `r3dsims live` adalah satu stream. Jalankan beberapa di port berbeda (atau di mesin lain) dan pantau semuanya di sini. Daftar disimpan di browser ini.</div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const token = qs.get('token');
+const headers = { 'Content-Type': 'application/json' };
+if (token) headers['X-Token'] = token;
+let hooks = { triggers: [], actions: {}, macros: {}, biomes: [] };
+let hooksSig = '';
+let sideKeys = [];
+
+/* ---------- helpers: every piece of text from the network goes through textContent, never innerHTML ---------- */
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+function kv(box, pairs) {
+  clear(box);
+  for (const [k, v] of pairs) { box.append(el('span', k), el('span', v)); }
+}
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? h + 'j ' + m + 'm' : m + 'm ' + (s % 60) + 'd';
+}
+const num = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
+
+function log(text, cls) {
+  const d = el('div', new Date().toLocaleTimeString() + '  ' + text, cls);
+  const box = $('log');
+  box.appendChild(d);
+  while (box.children.length > 80) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function post(path, body, label) {
+  try {
+    const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    let note = '';
+    if (j.results) note = j.results.map((x) => (x.matched || []).join(', ') || (x.duplicate ? 'duplikat' : 'tidak ada trigger')).join(' | ');
+    else if (j.error) note = j.error;
+    else if (j.phase) note = 'fase ' + j.phase;
+    log(label + (note ? ' -> ' + note : ''), r.ok ? 'ok' : 'bad');
+    return { ok: r.ok, j };
+  } catch (e) {
+    log(label + ' gagal: ' + e, 'bad');
+    return { ok: false, j: {} };
+  }
+}
+
+/* ---------- tabs ---------- */
+function showTab(name) {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.id === 'tab-' + name));
+  history.replaceState(null, '', '#' + name);
+  if (name === 'streams') renderPeers();
+}
+document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+if (['siaran', 'uji', 'streams'].includes(location.hash.slice(1))) showTab(location.hash.slice(1));
+
+/* ---------- TikTok ---------- */
+const TT = {
+  off: ['tidak tersambung', ''], waiting: ['menunggu akun live', 'warn'], connecting: ['menyambung…', 'warn'],
+  live: ['tersambung', 'ok'], reconnecting: ['menyambung ulang', 'warn'], error: ['galat', 'bad'],
+};
+function setBadge(node, text, cls) { node.textContent = text; node.className = 'badge' + (cls ? ' ' + cls : ''); }
+
+function renderTikTok(s) {
+  if (!s) return;
+  const [text, cls] = TT[s.state] || [s.state, ''];
+  setBadge($('ttBadge'), text, cls);
+  if (s.username && document.activeElement !== $('ttUser') && !$('ttUser').value) $('ttUser').value = '@' + s.username;
+  const rows = [];
+  if (s.username) rows.push(['akun', '@' + s.username]);
+  if (s.state === 'live' || s.state === 'reconnecting') {
+    rows.push(['penonton', num(s.viewers)], ['like total', num(s.likes)], ['masuk', fmtDur(Math.max(0, Date.now() / 1000 - s.since_unix))]);
+  }
+  if (s.events_total) {
+    const c = s.counts || {};
+    rows.push(['event', num(s.events_total) + ' (' + s.events_per_min + '/menit)'],
+      ['rinci', 'chat ' + num(c.comment) + ' · gift ' + num(c.gift) + ' · like ' + num(c.like) + ' · join ' + num(c.join) + ' · follow ' + num(c.follow)]);
+  }
+  if (s.dropped) rows.push(['dibuang', num(s.dropped) + ' (batas banjir chat/join)']);
+  if (s.proxy) rows.push(['proxy', 'dipakai']);
+  kv($('ttInfo'), rows);
+  $('ttErr').textContent = s.error || '';
+  $('ttHint').textContent = s.hint || '';
+}
+
+function renderFeed(feed) {
+  const box = $('feed');
+  clear(box);
+  for (const f of feed || []) {
+    const d = el('div');
+    d.append(el('span', new Date(f.t * 1000).toLocaleTimeString(), 'k'), el('b', f.user + ' '), el('span', (f.kind === 'comment' ? '' : f.kind + ' ') + (f.text || ''), f.kind === 'gift' ? 'gift' : ''));
+    box.appendChild(d);
+  }
+}
+
+$('ttConnect').onclick = async () => {
+  const name = $('ttUser').value.trim();
+  if (!name) return log('isi username TikTok dulu', 'bad');
+  const r = await post('/tiktok', { op: 'connect', username: name }, 'tiktok sambung ' + name);
+  if (r.ok) poll();
+};
+$('ttUser').onkeydown = (e) => { if (e.key === 'Enter') $('ttConnect').click(); };
+$('ttDisconnect').onclick = async () => { await post('/tiktok', { op: 'disconnect' }, 'tiktok putus'); $('ttUser').value = ''; poll(); };
+
+/* ---------- video output ---------- */
+const OUT = { off: ['mati', ''], streaming: ['menyiarkan', 'ok'], restarting: ['menyambung ulang', 'warn'], error: ['galat', 'bad'] };
+function renderOutput(o) {
+  if (!o || !o.state) return;
+  const [text, cls] = OUT[o.state] || [o.state, ''];
+  setBadge($('outBadge'), text, cls);
+  const rows = [];
+  if (o.target) rows.push(['tujuan', o.target]);
+  rows.push(['video', (o.resolution || '') + ' @ ' + (o.fps || '') + ' fps, ' + (o.bitrate_k || '') + ' kbit/s']);
+  if (o.active) rows.push(['berjalan', fmtDur(o.uptime_secs)]);
+  if (o.restarts) rows.push(['restart otomatis', String(o.restarts)]);
+  if (o.ffmpeg === false) rows.push(['ffmpeg', 'tidak ditemukan di PATH']);
+  kv($('outInfo'), rows);
+  $('outErr').textContent = o.error || '';
+}
+$('outServer').value = localStorage.getItem('r3d.out.server') || '';
+$('outStart').onclick = async () => {
+  const server = $('outServer').value.trim();
+  const key = $('outKey').value.trim();
+  if (!server) return log('isi Server URL dulu', 'bad');
+  localStorage.setItem('r3d.out.server', server);
+  const r = await post('/output', { op: 'start', server, key, bitrate: +$('outBitrate').value || 3500 }, 'siaran mulai');
+  if (r.ok) { $('outKey').value = ''; renderOutput(r.j.output); }
+};
+$('outStop').onclick = async () => { const r = await post('/output', { op: 'stop' }, 'siaran stop'); if (r.ok) renderOutput(r.j.output); };
+
+/* ---------- match, score, history ---------- */
+const control = (op) => post('/control', { op }, 'kontrol ' + op);
+document.querySelectorAll('[data-ctl]').forEach((b) => (b.onclick = () => control(b.dataset.ctl)));
+
+function chip(label, value) {
+  const c = el('span', label + ' ', 'chip');
+  c.appendChild(el('b', value));
+  return c;
+}
+
+function fillSides(keys, names) {
+  if (keys.join() === sideKeys.join()) return;
+  sideKeys = keys;
+  for (const id of ['sideSel', 'runSide']) {
+    const s = $(id);
+    const keep = s.value;
+    clear(s);
+    if (id === 'sideSel') { const o = el('option', 'otomatis'); o.value = ''; s.appendChild(o); }
+    for (const k of keys) { const o = el('option', k + ' · ' + (names[k] || '')); o.value = k; s.appendChild(o); }
+    s.value = keep;
+  }
+}
+
+function renderState(st) {
+  const keys = Object.keys(st.sides || {});
+  fillSides(keys, Object.fromEntries(keys.map((k) => [k, st.sides[k].name])));
+  const chips = $('chips');
+  clear(chips);
+  chips.append(
+    chip('fase', st.phase + (st.paused ? ' (pause)' : '')),
+    chip('ronde', st.round + '/' + (st.mode === 'endless' ? '∞' : st.rounds)),
+    chip('sisa', (st.round_secs_left || 0) + 's'),
+    chip('biome', st.biome || '-'),
+    chip('fps', st.perf && st.perf.fps ? Math.round(st.perf.fps) : '-'),
+  );
+  if (st.cinematic) chips.append(chip('kamera', 'ultimate'));
+  if (st.autopilot) chips.append(chip('mode', 'autopilot'));
+  renderTikTok(st.tiktok);
+  renderOutput(st.output);
+
+  const score = $('score');
+  clear(score);
+  keys.forEach((k, i) => {
+    const s = st.sides[k];
+    const sess = (st.session && st.session.sides && st.session.sides[k]) || { wins: 0, losses: 0 };
+    const col = i === 0 ? 'var(--a)' : 'var(--b)';
+    const wrap = el('div');
+    const nm = el('div', null, 'name');
+    const l = el('b', s.name);
+    l.style.color = col;
+    nm.append(l, el('span', 'HP ' + s.hp + ' · pasukan ' + s.units + ' · babak ini ' + s.round_wins + ' menang'));
+    const bar = el('div', null, 'bar');
+    const fill = el('i');
+    fill.style.width = Math.max(0, Math.min(100, (100 * s.hp) / s.max_hp)) + '%';
+    fill.style.background = col;
+    bar.appendChild(fill);
+    wrap.append(nm, bar, el('div', 'sesi ini: ' + sess.wins + ' menang, ' + sess.losses + ' kalah', 'hint'));
+    score.appendChild(wrap);
+  });
+  if (st.session) {
+    score.appendChild(el('div', 'sesi ini: ' + st.session.rounds + ' babak, ' + st.session.draws + ' seri, ' + st.session.matches + ' match · berjalan ' + Math.round((st.session.secs || 0) / 60) + ' mnt', 'hint'));
+  }
+}
+
+function td(text) { return el('td', text); }
+function renderHistory(h) {
+  const box = $('history');
+  clear(box);
+  if (h.enabled === false) { box.textContent = 'riwayat mati (live dijalankan dengan --no-history)'; return; }
+  const t = el('table');
+  const head = el('tr');
+  for (const x of ['mulai', 'mnt', 'babak', 'skor (M-K)', 'hasil']) head.appendChild(el('th', x));
+  t.appendChild(head);
+  for (const s of (h.sessions || []).slice(0, 8)) {
+    const tr = el('tr', null, s.current ? 'cur' : '');
+    const sides = Object.values(s.sides || {});
+    const res = s.result === 'draw' ? 'seri' : s.result ? (s.sides[s.result] || {}).name : '-';
+    tr.append(
+      td(new Date(s.started_unix * 1000).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) + (s.current ? ' •' : '')),
+      td(Math.round(s.secs / 60)), td(s.rounds), td(sides.map((x) => x.name + ' ' + x.wins + '-' + x.losses).join(' | ')), td(res));
+    t.appendChild(tr);
+  }
+  box.appendChild(t);
+  const tot = h.totals || {};
+  box.appendChild(el('div', 'total ' + (tot.sessions || 0) + ' sesi, ' + (tot.rounds || 0) + ' babak, ' + (tot.draws || 0) + ' seri', 'hint'));
+  for (const [name, v] of Object.entries(tot.by_side || {})) {
+    box.appendChild(el('div', name + ': ' + v.wins + ' menang, ' + v.losses + ' kalah (babak) · sesi menang ' + v.sessions_won + ', kalah ' + v.sessions_lost));
+  }
+}
+
+/* ---------- test bench ---------- */
+function eventBase() {
+  const ev = { user: $('user').value || 'Tester', count: Math.max(1, +$('count').value || 1) };
+  if ($('sideSel').value) ev.side = $('sideSel').value;
+  return ev;
+}
+const sendGift = (gift, extra) => post('/webhook', { type: 'gift', gift, diamonds: 1, ...eventBase(), ...extra }, 'gift ' + gift + ' x' + eventBase().count);
+const sendEvent = (type, extra) => post('/webhook', { type, ...eventBase(), ...extra }, type);
+
+function giftName(t) {
+  const on = Array.isArray(t.on) ? t.on : [t.on];
+  for (const p of on) {
+    const m = /^gift:(.+)$/i.exec(String(p));
+    if (m && !m[1].includes('*')) return m[1];
+  }
+  return null;
+}
+
+function buildStatic() {
+  const gifts = $('gifts');
+  clear(gifts);
+  const seen = new Set();
+  for (const t of hooks.triggers || []) {
+    const g = giftName(t);
+    if (!g || seen.has(g)) continue;
+    seen.add(g);
+    const b = el('button', t.label || t.name || g, 'gift');
+    b.appendChild(el('small', 'gift ' + g + (t.cooldown ? ' · cooldown ' + t.cooldown + 's' : '')));
+    b.onclick = () => sendGift(g);
+    gifts.appendChild(b);
+  }
+  if (!seen.size) gifts.textContent = 'belum ada trigger gift';
+  const sel = $('runName');
+  clear(sel);
+  for (const n of Object.keys(hooks.macros || {})) { const o = el('option', 'makro: ' + n); o.value = n; sel.appendChild(o); }
+  for (const n of Object.keys(hooks.actions || {})) { const o = el('option', 'aksi: ' + n); o.value = n; sel.appendChild(o); }
+  const bio = $('biomes');
+  clear(bio);
+  for (const k of hooks.biomes || []) { const b = el('button', k); b.onclick = () => control('biome:' + k); bio.appendChild(b); }
+  if (!(hooks.biomes || []).length) bio.textContent = 'tidak ada biome';
+}
+
+document.querySelectorAll('[data-ev]').forEach((b) => (b.onclick = () => { const t = b.dataset.ev; sendEvent(t, t === 'like' ? { count: 10 } : {}); }));
+$('sendComment').onclick = () => { const text = $('comment').value.trim(); if (text) { sendEvent('comment', { text }); $('comment').value = ''; } };
+$('comment').onkeydown = (e) => { if (e.key === 'Enter') $('sendComment').click(); };
+$('run').onclick = () => { const n = $('runName').value; if (n) control('run:' + n + (sideKeys.length ? ':' + $('runSide').value : '')); };
+
+const names = ['Budi', 'Sari', 'Andi', 'Dewi', 'Eko', 'Rina', 'Joko', 'Mira', 'Tono', 'Lia'];
+const words = ['semangat!', 'gas terus', 'kubu merah menang', 'hidup rakyat', 'wow', 'lawan!', 'salam dari Bandung'];
+let simTimer = null;
+function simTick() {
+  const gifts = [...new Set((hooks.triggers || []).map(giftName).filter(Boolean))];
+  const user = names[Math.floor(Math.random() * names.length)];
+  const r = Math.random();
+  if (r < 0.45 && gifts.length) post('/webhook', { type: 'gift', gift: gifts[Math.floor(Math.random() * gifts.length)], user, count: 1 + Math.floor(Math.random() * 3), diamonds: 1 }, 'sim gift ' + user);
+  else if (r < 0.75) post('/webhook', { type: 'like', user, count: 5 + Math.floor(Math.random() * 20) }, 'sim like ' + user);
+  else post('/webhook', { type: 'comment', user, text: words[Math.floor(Math.random() * words.length)] }, 'sim komentar ' + user);
+}
+function resetSim() {
+  clearInterval(simTimer);
+  simTimer = null;
+  if ($('sim').checked) simTimer = setInterval(simTick, Math.max(300, (+$('simEvery').value || 1.5) * 1000));
+}
+$('sim').onchange = resetSim;
+$('simEvery').onchange = resetSim;
+
+/* ---------- other streams ---------- */
+const SELF = { name: 'Stream ini', url: location.origin, token: token || '', self: true };
+function loadPeers() { try { return JSON.parse(localStorage.getItem('r3d.peers') || '[]'); } catch (e) { return []; } }
+function savePeers(p) { localStorage.setItem('r3d.peers', JSON.stringify(p)); }
+const peerData = new Map();
+
+async function fetchPeer(p) {
+  const get = async (path) => {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 4000);
+    try { return await (await fetch(p.url.replace(/\/$/, '') + path, { signal: c.signal })).json(); } finally { clearTimeout(t); }
+  };
+  try { peerData.set(p.url, { ok: true, st: await get('/state') }); } catch (e) { peerData.set(p.url, { ok: false, err: String(e) }); }
+}
+
+function renderPeers() {
+  const box = $('peers');
+  clear(box);
+  const list = [SELF, ...loadPeers()];
+  for (const p of list) {
+    const d = peerData.get(p.url);
+    const card = el('div', null, 'card peer');
+    const head = el('div', null, 'name');
+    head.appendChild(el('b', p.name));
+    const link = el('a', 'buka dashboard');
+    link.href = p.url.replace(/\/$/, '') + '/dashboard' + (p.token ? '?token=' + encodeURIComponent(p.token) : '');
+    link.target = p.self ? '_self' : '_blank';
+    link.rel = 'noopener';
+    head.appendChild(link);
+    card.appendChild(head);
+    if (!d) card.appendChild(el('div', 'memuat…', 'hint'));
+    else if (!d.ok) card.appendChild(el('div', 'tidak terjangkau: ' + d.err, 'err'));
+    else {
+      const st = d.st;
+      const keys = Object.keys(st.sides || {});
+      card.appendChild(el('div', (st.title || '') + ' · ' + st.phase + ' · ronde ' + st.round + ' · ' + (st.biome || '-') + ' · ' + ((st.perf && st.perf.fps) || '-') + ' fps', 'hint'));
+      for (const k of keys) {
+        const s = st.sides[k];
+        const sess = (st.session && st.session.sides && st.session.sides[k]) || { wins: 0, losses: 0 };
+        card.appendChild(el('div', s.name + ': HP ' + s.hp + ' · ' + s.units + ' pasukan · sesi ' + sess.wins + 'M ' + sess.losses + 'K'));
+      }
+      const t = st.tiktok;
+      if (t) card.appendChild(el('div', 'TikTok: ' + ((TT[t.state] || [t.state])[0]) + (t.username ? ' @' + t.username : '') + (t.state === 'live' ? ' · ' + num(t.viewers) + ' penonton' : ''), 'hint'));
+      const o = st.output;
+      if (o) card.appendChild(el('div', 'Siaran: ' + ((OUT[o.state] || [o.state])[0]) + (o.active ? ' · ' + fmtDur(o.uptime_secs) : ''), 'hint'));
+    }
+    if (!p.self) {
+      const rm = el('button', 'hapus');
+      rm.style.marginTop = '6px';
+      rm.onclick = () => { savePeers(loadPeers().filter((x) => x.url !== p.url)); renderPeers(); };
+      card.appendChild(rm);
+    }
+    box.appendChild(card);
+  }
+}
+$('peerAdd').onclick = () => {
+  let url = $('peerUrl').value.trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  const peers = loadPeers().filter((x) => x.url !== url);
+  peers.push({ name: $('peerName').value.trim() || url, url, token: $('peerToken').value.trim() });
+  savePeers(peers);
+  $('peerName').value = $('peerUrl').value = $('peerToken').value = '';
+  pollPeers();
+};
+async function pollPeers() {
+  await Promise.all([SELF, ...loadPeers()].map(fetchPeer));
+  if ($('tab-streams').classList.contains('on')) renderPeers();
+}
+
+/* ---------- polling ---------- */
+async function poll() {
+  try { renderState(await (await fetch('/state')).json()); } catch (e) { /* server restarting */ }
+}
+async function pollFeed() {
+  try { renderFeed((await (await fetch('/tiktok')).json()).feed); } catch (e) { /* ignore */ }
+}
+async function pollHistory() {
+  try { renderHistory(await (await fetch('/history')).json()); } catch (e) { /* ignore */ }
+}
+async function loadHooks() {
+  try {
+    const next = await (await fetch('/hooks')).json();
+    const sig = JSON.stringify(next);
+    if (sig !== hooksSig) { hooksSig = sig; hooks = next; buildStatic(); }
+  } catch (e) { log('tidak bisa memuat /hooks: ' + e, 'bad'); }
+}
+
+loadHooks(); poll(); pollFeed(); pollHistory(); pollPeers();
+setInterval(poll, 500);
+setInterval(pollFeed, 1500);
+setInterval(pollHistory, 5000);
+setInterval(loadHooks, 15000);
+setInterval(pollPeers, 3000);
+</script>

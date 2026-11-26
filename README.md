@@ -83,14 +83,17 @@ r3dlive --file harbor/scene.json
 
 ## Live streaming (webhook in, picture out)
 
-The platform connector is another application: it `POST`s viewer events to `r3dsims live` and takes the picture from
+`r3dsims live` reads a TikTok LIVE room by itself (`--tiktok @username`: chat, gifts, likes and follows become events, it waits until
+the account is live and rejoins on its own), shows a dashboard at `/dashboard`, and can push the picture out as RTMP, which is how
+you go live to TikTok from Linux. Any other platform connector can still `POST` viewer events to it and take the picture from
 `/stream.mjpg`, `--out rtmp://...`, `--out srt://...` or `--out -` (MPEG-TS on stdout). You author and change the show
 with the CLI while it runs.
 
 ```
 r3dsims template demo -o demo
 r3dsims validate demo/war.json                  # checks every reference, plays a whole match headless
-r3dsims live demo/war.json --token SECRET       # http://127.0.0.1:8787/view
+r3dsims live demo/war.json --token SECRET --tiktok @username   # dashboard: http://127.0.0.1:8787/dashboard
+r3dsims output start --server rtmp://... --key KEY             # go live (TikTok gives a new key every session)
 r3dsims send gift Rose --user Budi              # what the connector does
 r3dsims hook publish my-gifts.json              # publish new triggers / macros / bots without a restart
 r3dsims overlay add '{"type":"emoji","emoji":":fire:","size":0.2,"ttl":2}'   # text, emoji, SVG, PNG, bars on screen

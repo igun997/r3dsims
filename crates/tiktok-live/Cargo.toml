@@ -1,0 +1,33 @@
+[package]
+name = "tiktok-live"
+version = "0.5.0"
+edition = "2021"
+license = "0BSD"
+description = "TikTok LIVE WebSocket client (vendored from PirateTok/live-rs, patched: anonymous ttwid from /live), used by r3dsims"
+repository = "https://github.com/PirateTok/live-rs"
+publish = false
+
+[lib]
+name = "tiktok_live"
+path = "src/lib.rs"
+
+[dependencies]
+prost = "0.14"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "socks"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+flate2 = "1"
+urlencoding = "2"
+base64 = "0.22"
+rand = "0.9"
+http = "1"
+futures-util = "0.3"
+
+# TLS comes from the system on macOS (Security.framework) and Windows (schannel); on Linux OpenSSL is built in, so the
+# release binary does not depend on which libssl the machine has.
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
