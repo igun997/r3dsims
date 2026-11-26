@@ -106,7 +106,7 @@ war keeps running, no restart needed:
 1. In a browser, open `livecenter.tiktok.com`, start the LIVE and copy the Server URL and the Stream key (only accounts that TikTok
    granted LIVE access and the stream key option see them).
 2. Paste both into the dashboard card **Siaran ke TikTok** and press **Mulai siaran**, or run
-   `r3dsims output start --server rtmp://... --key KEY` (`R3D_STREAM_KEY` also works). Stop with **Stop** / `output stop`.
+   `r3dsims output start --url rtmp://... --key KEY` (`R3D_STREAM_KEY` also works). Stop with **Stop** / `output stop`.
 3. The key is never shown again (the card shows `rtmp://host/app/…1234`) and is not stored.
 
 If ffmpeg dies (network drop) it is restarted after 3 seconds, at most 6 times a minute, then the card says the key may be used up.

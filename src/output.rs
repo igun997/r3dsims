@@ -27,10 +27,18 @@ impl FfSink {
             bail!("the video output needs ffmpeg in PATH");
         }
         let (ow, oh) = (w & !1, h & !1);
+        let lower = target.to_ascii_lowercase();
+        // Streaming platforms (TikTok, YouTube, Twitch) expect an audio track in the ingest: a silent AAC one keeps the
+        // stream accepted. Files and stdout stay video only.
+        let network = ["rtmp://", "rtmps://", "srt://", "udp://", "tcp://", "rtp://"].iter().any(|s| lower.starts_with(s));
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-hide_banner", "-loglevel", "warning", "-use_wallclock_as_timestamps", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s"])
             .arg(format!("{w}x{h}"))
-            .args(["-i", "-", "-vf"])
+            .args(["-i", "-"]);
+        if network {
+            cmd.args(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "128k", "-ar", "44100"]);
+        }
+        cmd.args(["-vf"])
             .arg(format!("scale={ow}:{oh},format=yuv420p"))
             .args(["-r"])
             .arg(fps.to_string())
@@ -42,7 +50,6 @@ impl FfSink {
             .arg(format!("{bitrate_k}k"))
             .args(["-bufsize"])
             .arg(format!("{}k", bitrate_k * 2));
-        let lower = target.to_ascii_lowercase();
         if target == "-" {
             cmd.args(["-f", "mpegts", "pipe:1"]);
             cmd.stdout(Stdio::inherit());

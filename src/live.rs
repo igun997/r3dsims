@@ -370,6 +370,15 @@ impl Live {
     pub fn start(opts: LiveOpts) -> Result<Live> {
         let (mut world, war) = War::load(&opts.war)?;
         world.clay = opts.clay;
+        if opts.out_h > opts.out_w {
+            // a vertical picture (TikTok): the scene camera was authored for a wide one
+            let t = &world.terrain;
+            let (yaw, pitch, zoom) = portrait_camera(t.w as f32 * t.cell, t.d as f32 * t.cell, opts.out_w as f32 / opts.out_h as f32);
+            let mut cam = world.rig.cam;
+            (cam.yaw, cam.pitch, cam.zoom) = (yaw, pitch, zoom);
+            world.rig.cam = cam;
+            world.rig.home = cam;
+        }
         let history = opts.history.clone().map(|p| {
             let st = war.state_json();
             let sides: Vec<(String, String)> = st["sides"].as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v["name"].as_str().unwrap_or(k).to_string())).collect()).unwrap_or_default();
@@ -621,4 +630,34 @@ impl Live {
 fn listen_is_loopback(listen: &str) -> bool {
     let host = listen.rsplit_once(':').map_or(listen, |(h, _)| h).trim_matches(['[', ']']);
     host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Camera for a vertical picture: turn it so the long side of the arena runs up the screen and make the whole arena fit
+/// between the HUD at the top and the gift menu at the bottom (about half of the height is free). Returns
+/// `(yaw, pitch, zoom)`; `zoom` is the number of world units across the shorter side, the width.
+pub fn portrait_camera(width: f32, depth: f32, aspect: f32) -> (f32, f32, f32) {
+    let pitch = 52.0f32;
+    let (yaw, long, short) = if width >= depth { (90.0, width, depth) } else { (0.0, depth, width) };
+    // vertical extent on the screen of the long side seen from `pitch`, plus a little for the height of things
+    let on_screen = long * pitch.to_radians().sin() + 4.0;
+    let zoom = (aspect * on_screen / 0.5).max(short * 1.12);
+    (yaw, pitch, zoom)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_vertical_picture_turns_the_arena_and_leaves_room_for_the_hud() {
+        // the templates' 52 x 30 tile arena on a 9:16 screen
+        let (yaw, pitch, zoom) = portrait_camera(52.0, 30.0, 720.0 / 1280.0);
+        assert_eq!(yaw, 90.0, "the long side (x) runs up the screen");
+        let across = zoom; // world units across the width
+        let up = zoom / (720.0 / 1280.0); // world units up the height
+        assert!(across >= 30.0 * 1.1, "the short side fits across: {across}");
+        assert!(52.0 * pitch.to_radians().sin() <= up * 0.55, "the long side fits in about half of the height: {up}");
+        // a map that is taller than wide needs no turn
+        assert_eq!(portrait_camera(30.0, 52.0, 0.5625).0, 0.0);
+    }
 }

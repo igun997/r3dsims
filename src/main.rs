@@ -85,13 +85,13 @@ enum Cmd {
         #[command(flatten)]
         conn: Conn,
     },
-    /// Video output of a running `live`: `output start --server rtmp://... --key KEY`, `output stop`, `output status`.
+    /// Video output of a running `live`: `output start --url rtmp://... --key KEY`, `output stop`, `output status`.
     Output {
         /// start | stop | status
         op: String,
         /// rtmp://, rtmps://, srt:// or udp:// address (TikTok calls it the Server URL)
         #[arg(long)]
-        server: Option<String>,
+        url: Option<String>,
         /// stream key (TikTok gives a new one for every LIVE session)
         #[arg(long, env = "R3D_STREAM_KEY", hide_env_values = true)]
         key: Option<String>,
@@ -798,11 +798,11 @@ fn main() -> Result<()> {
             "disconnect" => show(&conn.client()?, "POST", "/tiktok", Some(&json!({"op": "disconnect"}).to_string())),
             other => bail!("tiktok: unknown op '{other}' (connect, disconnect, status)"),
         },
-        Cmd::Output { op, server, key, bitrate, conn } => match op.as_str() {
+        Cmd::Output { op, url, key, bitrate, conn } => match op.as_str() {
             "status" => show(&conn.client()?, "GET", "/output", None),
             "stop" => show(&conn.client()?, "POST", "/output", Some(&json!({"op": "stop"}).to_string())),
             "start" => {
-                let mut body = json!({"op": "start", "server": server.unwrap_or_default(), "key": key.unwrap_or_default()});
+                let mut body = json!({"op": "start", "server": url.unwrap_or_default(), "key": key.unwrap_or_default()});
                 if let Some(b) = bitrate {
                     body["bitrate"] = json!(b);
                 }
