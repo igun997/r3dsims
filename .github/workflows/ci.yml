@@ -29,9 +29,20 @@ jobs:
         run: |
           cargo build --release -p r3dsims --locked
           bin=target/release/r3dsims
-          for t in kampung rumah pelabuhan; do
+          for t in kampung rumah pelabuhan perang demo; do
             $bin template $t -o /tmp/$t
             $bin validate /tmp/$t/scene.json
+          done
+          for t in perang demo; do
+            $bin validate /tmp/$t/war.json
+            # the live server: renders, takes a webhook, answers state, then stops by itself
+            $bin live /tmp/$t/war.json --listen 127.0.0.1:8799 --seconds 6 --size 640x360 --pixel 1 &
+            for i in $(seq 1 50); do curl -sf http://127.0.0.1:8799/health > /dev/null && break; sleep 0.2; done
+            export R3D_SERVER=http://127.0.0.1:8799
+            $bin control start
+            $bin send gift Rose --user ci
+            $bin state | grep -q '"phase"'
+            wait
           done
           $bin render /tmp/pelabuhan/scene.json -o /tmp/shot.png --preset feed --at 40
           $bin render /tmp/rumah/scene.json -o /tmp/clip.mp4 --preset square --seconds 2
