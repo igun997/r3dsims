@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{emoji, font};
+use ab_glyph::{Font as _, FontRef, GlyphId, PxScale, ScaleFont as _, point};
 
 fn d_black() -> String {
     "#000000".into()
@@ -100,6 +101,9 @@ pub enum Kind {
         /// wrap at this fraction of the frame width
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_width: Option<f32>,
+        /// ui (default): the bundled smooth font, upper and lower case, accents. pixel: the retro 3x5 font, A-Z only.
+        #[serde(default = "d_ui")]
+        font: String,
     },
     /// One emoji, e.g. `"emoji": "🌹"` or `"emoji": ":rose:"`. `size` = height.
     Emoji {
@@ -240,6 +244,7 @@ impl Element {
             pad: d_pad(),
             align: d_align(),
             max_width: None,
+            font: d_ui(),
         })
     }
 
@@ -721,7 +726,62 @@ impl Compositor {
         None
     }
 
+    /// Smooth text in the bundled UI font, emoji inline. `size` is the font size (fraction of the shorter side).
+    fn text_sprite_ui(&mut self, k: &TextArgs, short: f32, frame_w: f32) -> Sprite {
+        let em = (k.size * short).max(6.0);
+        let pad = (k.pad * short).round().max(0.0) as i32;
+        let ow = (em * 0.07).round().max(1.0);
+        let max_px = k.max_width.map(|m| m * frame_w - 2.0 * pad as f32);
+        let lines = ui_layout(&k.text, em, max_px);
+        let widths: Vec<f32> = lines.iter().map(|l| ui_line_width(l)).collect();
+        let tw = widths.iter().copied().fold(0.0f32, f32::max);
+        let line_h = em * 1.3;
+        let (w, h) = (tw.ceil() as i32 + 2 * pad + 2 * ow as i32, (line_h * lines.len() as f32).ceil() as i32 + 2 * pad);
+        let mut sp = Sprite::new(w as usize, h as usize);
+        if let Some(bg) = &k.bg {
+            sp.round_rect(0.0, 0.0, w as f32, h as f32, (pad as f32).max(em * 0.3), parse_color(bg));
+        }
+        let color = parse_color(&k.color);
+        let outline = k.outline.as_deref().map(parse_color);
+        let ascent = ui_font().as_scaled(PxScale::from(em)).ascent();
+        for (li, line) in lines.iter().enumerate() {
+            let mut x = pad as f32 + ow
+                + match k.align.as_str() {
+                    "left" => 0.0,
+                    "right" => tw - widths[li],
+                    _ => (tw - widths[li]) / 2.0,
+                };
+            let base = pad as f32 + li as f32 * line_h + ascent + em * 0.06;
+            for (run, adv) in line {
+                match run {
+                    UiRun::Glyph(id, kern) => {
+                        x += kern;
+                        if k.shadow {
+                            paint_glyph(&mut sp, *id, em, x + ow, base + ow, [0, 0, 0, 150]);
+                        }
+                        if let Some(o) = outline {
+                            for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-0.7, -0.7), (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7)] {
+                                paint_glyph(&mut sp, *id, em, x + dx * ow, base + dy * ow, o);
+                            }
+                        }
+                        paint_glyph(&mut sp, *id, em, x, base, color);
+                    }
+                    UiRun::Emoji(e) => {
+                        let es = self.emoji_sprite(e, (em * 1.05).round().max(4.0) as u32);
+                        sp.over_sprite(&es, x.round() as i32, (base - em * 0.88).round() as i32);
+                    }
+                    UiRun::Space => {}
+                }
+                x += adv;
+            }
+        }
+        sp
+    }
+
     fn text_sprite(&mut self, k: &TextArgs, short: f32, frame_w: f32) -> Sprite {
+        if k.font != "pixel" {
+            return self.text_sprite_ui(k, short, frame_w);
+        }
         let s = ((k.size * short / 5.0).round() as i32).max(1);
         let pad = (k.pad * short).round() as i32;
         let max_px = k.max_width.map(|m| (m * frame_w) as i32 - 2 * pad);
@@ -817,8 +877,8 @@ impl Compositor {
             self.cache.clear();
         }
         let sp = match kind {
-            Kind::Text { text, size, color, shadow, outline, bg, pad, align, max_width } => {
-                self.text_sprite(&TextArgs { text, size, color, shadow, outline, bg, pad, align, max_width }, short, fw as f32)
+            Kind::Text { text, size, color, shadow, outline, bg, pad, align, max_width, font } => {
+                self.text_sprite(&TextArgs { text, size, color, shadow, outline, bg, pad, align, max_width, font }, short, fw as f32)
             }
             Kind::Emoji { emoji: e, size } => {
                 let px = ((size * short).round() as u32).clamp(1, 2048);
@@ -962,6 +1022,119 @@ struct TextArgs {
     pad: f32,
     align: String,
     max_width: Option<f32>,
+    font: String,
+}
+
+fn d_ui() -> String {
+    "ui".into()
+}
+
+const UI_FONT: &[u8] = include_bytes!("../assets/fonts/Roboto-Bold.ttf");
+
+static UI_FONT_FACE: std::sync::LazyLock<FontRef<'static>> = std::sync::LazyLock::new(|| FontRef::try_from_slice(UI_FONT).expect("the bundled font parses"));
+
+fn ui_font() -> &'static FontRef<'static> {
+    &UI_FONT_FACE
+}
+
+enum UiRun {
+    /// glyph and the kerning to apply before it
+    Glyph(GlyphId, f32),
+    Emoji(String),
+    Space,
+}
+
+/// `(run, advance)` for a string: text in the UI font, emoji clusters inline. Characters the font lacks become a gap.
+fn ui_runs(text: &str, em: f32) -> Vec<(UiRun, f32)> {
+    let sc = ui_font().as_scaled(PxScale::from(em));
+    let mut out = vec![];
+    let mut prev: Option<GlyphId> = None;
+    for piece in emoji::split(text) {
+        match piece {
+            emoji::Piece::Emoji(e) => {
+                out.push((UiRun::Emoji(e), em * 1.15));
+                prev = None;
+            }
+            emoji::Piece::Text(t) => {
+                for c in t.chars() {
+                    if c == ' ' || c == '\t' {
+                        out.push((UiRun::Space, em * 0.3));
+                        prev = None;
+                        continue;
+                    }
+                    let id = sc.glyph_id(c);
+                    if id.0 == 0 {
+                        out.push((UiRun::Space, em * 0.5));
+                        prev = None;
+                        continue;
+                    }
+                    let kern = prev.map_or(0.0, |p| sc.kern(p, id));
+                    prev = Some(id);
+                    out.push((UiRun::Glyph(id, kern), sc.h_advance(id)));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn ui_run_width(r: &(UiRun, f32)) -> f32 {
+    r.1 + if let UiRun::Glyph(_, k) = &r.0 { *k } else { 0.0 }
+}
+
+fn ui_line_width(line: &[(UiRun, f32)]) -> f32 {
+    line.iter().map(ui_run_width).sum()
+}
+
+/// Lines of runs; words wrap at `max_px` when set.
+fn ui_layout(text: &str, em: f32, max_px: Option<f32>) -> Vec<Vec<(UiRun, f32)>> {
+    let mut lines = vec![];
+    for para in text.split('\n') {
+        let runs = ui_runs(para, em);
+        let Some(max) = max_px else {
+            lines.push(runs);
+            continue;
+        };
+        let mut cur: Vec<(UiRun, f32)> = vec![];
+        let mut word: Vec<(UiRun, f32)> = vec![];
+        let flush = |cur: &mut Vec<(UiRun, f32)>, word: &mut Vec<(UiRun, f32)>, lines: &mut Vec<Vec<(UiRun, f32)>>| {
+            if word.is_empty() {
+                return;
+            }
+            let ww = ui_line_width(word);
+            if !cur.is_empty() && ui_line_width(cur) + em * 0.3 + ww > max {
+                lines.push(std::mem::take(cur));
+            }
+            if !cur.is_empty() {
+                cur.push((UiRun::Space, em * 0.3));
+            }
+            cur.append(word);
+        };
+        for r in runs {
+            if matches!(r.0, UiRun::Space) {
+                flush(&mut cur, &mut word, &mut lines);
+            } else {
+                word.push(r);
+            }
+        }
+        flush(&mut cur, &mut word, &mut lines);
+        lines.push(cur);
+    }
+    lines
+}
+
+/// Anti-aliased glyph, source-over into the sprite.
+fn paint_glyph(sp: &mut Sprite, id: GlyphId, em: f32, x: f32, base: f32, c: [u8; 4]) {
+    let g = id.with_scale_and_position(PxScale::from(em), point(x, base));
+    if let Some(o) = ui_font().outline_glyph(g) {
+        let b = o.px_bounds();
+        o.draw(|gx, gy, cov| {
+            let a = (cov * c[3] as f32) as u8;
+            if a > 0 {
+                sp.over(b.min.x as i32 + gx as i32, b.min.y as i32 + gy as i32, [c[0], c[1], c[2], a]);
+            }
+        });
+    }
 }
 
 fn placeholder(px: usize) -> Sprite {
@@ -1178,5 +1351,45 @@ mod tests {
         let by = (0.9 * h as f32) as usize;
         assert!(px(left + bw * 6 / 10, by)[0] > 200, "bar fill missing");
         assert!(px(left + bw * 9 / 10, by)[0] < 60, "bar should be empty past 75%");
+    }
+
+    fn drawn_px(o: &Overlay, w: usize, h: usize) -> (usize, usize, usize, usize) {
+        let mut c = comp();
+        let mut frame = vec![0u8; w * h * 3];
+        c.draw(&mut frame, w, h, &o.drawables(), &Vars::new());
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+        for (i, p) in frame.chunks_exact(3).enumerate() {
+            if p != [0, 0, 0] {
+                let (x, y) = (i % w, i / w);
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+        (x0, y0, x1, y1)
+    }
+
+    #[test]
+    fn ui_text_is_smooth_mixed_case_and_wraps() {
+        let (w, h) = (640usize, 360usize);
+        let one = |t: &str, font: &str, max: Option<f32>| {
+            let mut e = Element::text(t, 0.05).at(0.0, 0.0, "top-left");
+            if let Kind::Text { font: f, max_width, .. } = &mut e.kind {
+                *f = font.into();
+                *max_width = max;
+            }
+            let mut o = Overlay::new();
+            o.add(e);
+            drawn_px(&o, w, h)
+        };
+        // lower case and accents draw (the pixel font only has A-Z) and a longer string is wider
+        let (_, _, a, _) = one("Halo", "ui", None);
+        let (_, _, b, _) = one("Halo Dünia kita", "ui", None);
+        assert!(a > 20 && b > a + 60, "widths {a} {b}");
+        // a width limit wraps onto a second line
+        let (_, _, _, h1) = one("satu dua tiga empat lima enam", "ui", None);
+        let (_, _, _, h2) = one("satu dua tiga empat lima enam", "ui", Some(0.3));
+        assert!(h2 > h1 + 15, "wrapped text should be taller: {h1} vs {h2}");
+        // the retro font is still there on request
+        let (_, _, p, _) = one("HALO", "pixel", None);
+        assert!(p > 20);
     }
 }

@@ -643,8 +643,8 @@ pub fn war_json() -> Value {
             {"name": "perfume", "on": "gift:perfume", "side": "B", "do": "arrow_rain", "label": "PERFUME = HUJAN PANAH BIRU", "icon": ":bow:"},
             {"name": "galaxy", "on": "gift:galaxy", "side": "B", "macro": "apocalypse", "label": "GALAXY = ULTIMATE KIAMAT BIRU", "icon": ":glowing_star:", "cooldown": 10},
             {"name": "whale", "on": "gift:whale", "side": "B", "macro": "leviathan", "label": "PAUS = ULTIMATE TSUNAMI BIRU", "icon": ":wave:", "cooldown": 15},
-            {"name": "universe", "on": "gift:universe", "side": "A", "macro": "thunder_god", "label": "UNIVERSE = ULTIMATE BADAI PETIR MERAH", "icon": ":bolt:", "cooldown": 12},
-            {"name": "lion", "on": "gift:lion", "side": "trailing", "macro": "royal_guard", "label": "LION = PENGAWAL RAJA (YANG KALAH)", "icon": ":lion:", "cooldown": 8},
+            {"name": "universe", "on": "gift:universe", "side": "A", "macro": "thunder_god", "label": "UNIVERSE = ULTIMATE BADAI PETIR", "icon": ":bolt:", "cooldown": 12},
+            {"name": "lion", "on": "gift:lion", "side": "trailing", "macro": "royal_guard", "label": "LION = PENGAWAL (YANG KALAH)", "icon": ":lion:", "cooldown": 8},
             {"name": "join_red", "on": "comment:~merah", "side": "A", "do": {"type": "spawn", "count": 1}, "cooldown": 1.5, "legend": false, "announce": "{user} BERGABUNG KE MERAH"},
             {"name": "join_blue", "on": "comment:~biru", "side": "B", "do": {"type": "spawn", "count": 1}, "cooldown": 1.5, "legend": false, "announce": "{user} BERGABUNG KE BIRU"},
             {"name": "likes", "on": "like", "side": "event", "do": {"type": "spawn", "count": 1}, "min_count": 10, "cooldown": 3, "legend": false, "announce": "{user} LIKE x{count}"}

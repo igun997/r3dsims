@@ -1,6 +1,6 @@
 ---
 name: r3dsims-live
-description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by webhooks: gifts, likes and comments become effects, ultimates get first-person camera effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state. The platform connector is a separate app.
+description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by webhooks: gifts, likes and comments become effects, ultimates get a camp point-of-view camera with their own effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state. The platform connector is a separate app.
 ---
 
 # r3dsims live
@@ -80,8 +80,9 @@ r3dsims overlay add '{"type":"rect","full":true,"color":"#ff000030","ttl":1.5,"a
 r3dsims overlay add '{"type":"vignette","strength":0.6,"ttl":3}'
 ```
 
-Positions are fractions of the frame; lengths are fractions of the SHORTER side. Text is a pixel font (A-Z, digits,
-basic punctuation); emoji (`🌹` or `:rose:`) work inline in text and as elements, from a built-in vector set
+Positions are fractions of the frame; lengths and text `size` (the font size) are fractions of the SHORTER side. Text is
+smooth (bundled Roboto Bold, upper and lower case, Latin accents; `"font": "pixel"` for the retro A-Z font); keep it small (0.02-0.03), the HUD
+is deliberately light so viewers keep the picture. Emoji (`🌹` or `:rose:`) work inline in text and as elements, from a built-in vector set
 (`overlay emoji` lists it; `--emoji-dir` adds more). Live values: `{hp.A}`, `{name.B}`, `{round}`, `{time}`, `{biome}`,
 `{ticker.1}`, `{top1}`, `{user}` (inside trigger overlays), `{var.NAME}`.
 

@@ -276,7 +276,7 @@ Units: `at` is a fraction of the frame; every length (`size`, `w`, `h`, `pad`, `
 
 | `type` | fields |
 | --- | --- |
-| `text` | `text`, `size`, `color`, `shadow`, `outline`, `bg`, `pad`, `align`, `max_width` |
+| `text` | `text`, `size` (font size), `color`, `shadow`, `outline`, `bg`, `pad`, `align`, `max_width`, `font` (`ui` default, `pixel`) |
 | `emoji` | `emoji` (a character or `:name:`), `size` |
 | `svg` | `src` (file) or `svg` (inline markup), `w`, `h` |
 | `image` | `src` (PNG, or an SVG by extension), `w`, `h` |
@@ -288,8 +288,8 @@ Common: `id`, `at`, `anchor` (`center`, `top-left`, `top`, `bottom`...), `offset
 `anim_in` (`pop` `fade` `slide_up` `slide_down` `slide_left` `slide_right`), `anim_out`, `anim_secs`,
 `from` / `until` (seconds on the overlay clock), `visible`.
 
-* **Text** uses a built-in pixel font: A-Z (case-insensitive), 0-9 and `. , ! ? : - @ ' / + % ( ) = > < * # _ & | [ ]`.
-  Emoji, real characters or `:short:` names, are drawn inline. Other characters (accents, CJK) leave a gap.
+* **Text** uses a bundled smooth font (Roboto Bold): upper and lower case, digits, Latin accents and punctuation. Characters it lacks (CJK, Arabic) are skipped as a gap. `"font": "pixel"` selects the retro 3x5 font (A-Z, 0-9 and `. , ! ? : - @ ' / + % ( ) = > < * # _ & | [ ]`). Keep `size` small (0.02 to 0.03): the built-in HUD is thin on purpose so it does not cover the picture.
+  Emoji, real characters or `:short:` names, are drawn inline.
 * **Emoji** come from a built-in set of about 55 vector emoji, so they work on a server without any
   emoji font (`r3dsims overlay emoji`). For the full set put Twemoji/Noto SVGs named by code point
   (`1f339.svg`, or `.png`) in a folder and pass `--emoji-dir DIR`. An unknown emoji shows a `?` tile.
