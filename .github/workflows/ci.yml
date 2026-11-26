@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev \
+            libxi-dev libxrandr-dev libvulkan-dev pkg-config mesa-vulkan-drivers ffmpeg
+      - name: Unit and integration tests (GPU tests run on lavapipe)
+        run: cargo test -p r3dsims --locked
+      - name: Build the live app
+        run: cargo build -p r3dsims-live --locked
+      - name: End-to-end smoke test (template, validate, render, record)
+        run: |
+          cargo build --release -p r3dsims --locked
+          bin=target/release/r3dsims
+          for t in kampung rumah pelabuhan; do
+            $bin template $t -o /tmp/$t
+            $bin validate /tmp/$t/scene.json
+          done
+          $bin render /tmp/pelabuhan/scene.json -o /tmp/shot.png --preset feed --at 40
+          $bin render /tmp/rumah/scene.json -o /tmp/clip.mp4 --preset square --seconds 2
+          ffprobe -v error -show_entries stream=codec_name,width,height -of default=nw=1 /tmp/clip.mp4
+          test -s /tmp/shot.png

@@ -1,0 +1,53 @@
+[package]
+name = "r3dsims"
+version = "0.1.0"
+edition = "2024"
+description = "Scriptable voxel-pixel 3D diorama sandbox: modular assets, story scenes, camera events, recording"
+license = "MIT"
+repository = "https://github.com/igun997/r3dsims"
+readme = "README.md"
+
+[workspace]
+resolver = "3"
+members = [".", "crates/live"]
+default-members = ["."]
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+gif = "0.13"
+glam = "0.29"
+png = "0.17"
+pollster = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+wgpu = { version = "~30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wgpu = { version = "~30.0.1", default-features = false, features = ["vulkan"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "~30.0.1", default-features = false, features = ["metal"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wgpu = { version = "~30.0.1", default-features = false, features = ["dx12"] }
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[profile.dev]
+opt-level = 1
+
+# Rune (github.com/anomalyco/rune), the GPU UI used by crates/live, needs these patched crates
+# pinned at the same rev as the `rune` dependency (see crates/live/Cargo.toml).
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa" }

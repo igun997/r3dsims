@@ -1,0 +1,17 @@
+[package]
+name = "r3dsims-live"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/igun997/r3dsims"
+description = "GPU UI (Rune) for the r3dsims diorama: live view, camera control, scene triggers, recording"
+
+[[bin]]
+name = "r3dlive"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+r3dsims = { path = "../.." }
+rune = { git = "https://github.com/anomalyco/rune", rev = "66006728af7cd3dc54a6bb31ca7690242fb8d6aa", features = ["tooling"] }
+wgpu = { version = "~30.0.1", default-features = false }

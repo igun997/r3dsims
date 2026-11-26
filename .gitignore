@@ -1,0 +1,14 @@
+/target
+/recordings
+*.mp4
+*.webm
+
+# local rcargo / editor setup (machine specific, not part of the project)
+/rcargo.toml
+/.mcp.json
+/.vscode/
+/.claude/settings.json
+/.claude/skills/rcargo/
+/.claude/skills/rust-port/
+/.agents/skills/rcargo/
+/.agents/skills/rust-port/
