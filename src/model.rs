@@ -144,6 +144,8 @@ pub struct Part {
     /// Voxels at or above this y (part-local rest coordinates) are hidden when their `cut` flags
     /// say the wall is lowered. `i16::MAX` = nothing is ever cut.
     pub cut_y: i16,
+    /// Smooth clay surface of this part, built the first time the clay style draws it (shared by clones).
+    pub clay: std::sync::Arc<std::sync::OnceLock<crate::clay::ClayMesh>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -290,6 +292,7 @@ impl Model {
                 pivot: Vec3::from(pd.pivot),
                 voxels,
                 cut_y: i16::MAX,
+                clay: Default::default(),
             });
         }
         let part_index: HashMap<String, usize> =

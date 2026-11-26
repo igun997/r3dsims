@@ -4,7 +4,7 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
-use crate::model::{Model, Pose, Rgb, part_matrices};
+use crate::model::{Model, Part, Pose, Rgb, part_matrices};
 use crate::terrain::hash3;
 
 /// Ambient-occlusion brightness for AO level 0 (most occluded) ..= 3 (open).
@@ -100,6 +100,8 @@ pub struct Placed<'a> {
     pub lower_interior: bool,
     /// Master switch for wall cut-away.
     pub cutaway: bool,
+    /// Draw parts as smooth clay surfaces instead of voxel cubes (parts that cut away walls stay voxels).
+    pub clay: bool,
 }
 
 const AX: [Vec3; 6] = [Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y, Vec3::Z, Vec3::NEG_Z];
@@ -113,6 +115,10 @@ pub fn push_model(m: &Placed, mats: &mut Vec<Mat4>, mesh: &mut Mesh) {
             continue;
         }
         let mat = mats[pi];
+        if m.clay && part.cut_y == i16::MAX {
+            push_clay(m, pi, part, &mat, mesh);
+            continue;
+        }
         let normals: [Vec3; 6] = AX.map(|a| mat.transform_vector3(a).normalize());
         for v in &part.voxels {
             let mut f = v.f;
@@ -174,6 +180,36 @@ pub fn push_model(m: &Placed, mats: &mut Vec<Mat4>, mesh: &mut Mesh) {
             }
         }
     }
+}
+
+/// One part as its smooth clay mesh: the cached local vertices are moved by the part matrix and tinted from the
+/// entity's current palette.
+fn push_clay(m: &Placed, pi: usize, part: &Part, mat: &Mat4, mesh: &mut Mesh) {
+    let cm = part.clay.get_or_init(|| crate::clay::build(part));
+    if cm.verts.is_empty() {
+        return;
+    }
+    let rot = glam::Mat3::from_cols(mat.x_axis.truncate().normalize_or_zero(), mat.y_axis.truncate().normalize_or_zero(), mat.z_axis.truncate().normalize_or_zero());
+    let base = mesh.verts.len() as u32;
+    for v in &cm.verts {
+        let kind = match m.model.glow[v.c as usize] & 3 {
+            1 => 2,
+            2 => 3,
+            _ => 0,
+        };
+        let rgb = m.colors[v.c as usize];
+        mesh.verts.push(Vertex {
+            pos: mat.transform_point3(v.p).to_array(),
+            ao: v.ao,
+            normal: (rot * v.n).to_array(),
+            kind_mat: kind,
+            color: [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0],
+            obj: m.id,
+            uv: [0.0; 2],
+            seed: pi as u32 * 131,
+        });
+    }
+    mesh.idx.extend(cm.idx.iter().map(|i| i + base));
 }
 
 /// Which sides of an axis-aligned building face a camera at `yaw` degrees (bits +x -x +z -z).

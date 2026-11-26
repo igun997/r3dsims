@@ -484,6 +484,7 @@ impl Building {
             facing,
             lower_interior: self.cutaway != Cutaway::None,
             cutaway: self.cutaway != Cutaway::None,
+            clay: false,
         };
         push_model(&placed, mats, mesh);
     }

@@ -61,6 +61,8 @@ struct Globals {
     sky_bottom: [f32; 4],
     misc: [f32; 4],
     depth: [f32; 4],
+    /// x = 1 for the clay style (soft lighting, no pixel outlines or textures)
+    style: [f32; 4],
 }
 
 fn v4(v: Vec3, w: f32) -> [f32; 4] {
@@ -429,12 +431,14 @@ impl SceneRenderer {
             sky_bottom: v4(sky.bottom, 0.0),
             misc: [world.time, sky.glow, if pr.ortho { 1.0 } else { 0.0 }, 1.0 / SHADOW_RES as f32],
             depth: [pr.near, pr.far, self.w as f32, self.h as f32],
+            style: [if world.clay { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
-        let key = world.terrain.quads.as_ptr() as usize ^ world.terrain.quads.len().rotate_left(48);
+        let key = (world.terrain.quads.as_ptr() as usize ^ world.terrain.quads.len().rotate_left(48)) ^ world.clay as usize;
         if key != self.terrain_key {
-            self.terrain.upload(&self.device, &self.queue, &Mesh::from_quads(&world.terrain.quads));
+            let mesh = if world.clay { crate::clay::terrain_mesh(&world.terrain) } else { Mesh::from_quads(&world.terrain.quads) };
+            self.terrain.upload(&self.device, &self.queue, &mesh);
             self.terrain_key = key;
         }
         self.scratch.clear();
@@ -455,6 +459,7 @@ impl SceneRenderer {
                 facing: 0,
                 lower_interior: false,
                 cutaway: false,
+                clay: world.clay,
             };
             push_model(&placed, &mut self.mats, &mut self.scratch);
         }

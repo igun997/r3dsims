@@ -41,9 +41,14 @@ Picture out:
 | `--out match.mp4` | record the whole stream to a file |
 
 Size: `--preset live-wide` (1280x720, default), `live` (720x1280), any `render` preset, or `--size WxH`.
-`--pixel 1` (default) renders at the output size: fine pixels. `--pixel 2` renders at half the size and
-upscales with nearest-neighbour: chunky pixel art, half the GPU cost. `r3dsims state` shows the measured fps and
-where the frame time goes (`perf`).
+`--pixel 1` (default) renders at the output size. `--pixel 2` renders at half the size and upscales with
+nearest-neighbour (chunky, half the GPU cost). `r3dsims state` shows the measured fps and where the frame time
+goes (`perf`).
+
+Look: `--style clay` (default for `live`) draws every model and the ground as smooth hand-made clay: the voxel
+assets are smoothed into one soft surface (rounded edges, matte light, soft shadows, a slightly bumpy finish, no pixel
+outlines), so units, castles, trees and your own assets need no redrawing. The island rim and cliffs are rounded too.
+`--style voxel` brings back the blocky cube look. `render` takes the same flag (default `voxel`).
 For a portrait (TikTok) stream send a camera command once: `r3dsims step '{"op":"set","yaw":90,"zoom":46}'`.
 
 ## Webhook contract (what the connector sends)

@@ -33,6 +33,8 @@ pub struct LiveOpts {
     pub out_w: u32,
     pub out_h: u32,
     pub pixel: u32,
+    /// clay style (smooth hand-made figures) instead of voxel cubes
+    pub clay: bool,
     pub fps: u32,
     pub mjpeg: bool,
     pub quality: u8,
@@ -392,7 +394,8 @@ pub struct Live {
 impl Live {
     /// Loads the war, starts the HTTP server. No GPU yet.
     pub fn start(opts: LiveOpts) -> Result<Live> {
-        let (world, war) = War::load(&opts.war)?;
+        let (mut world, war) = War::load(&opts.war)?;
+        world.clay = opts.clay;
         let base_dir = opts.war.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let server = Server::http(&opts.listen).map_err(|e| anyhow!("listen on {}: {e}", opts.listen))?;
         let addr = server.server_addr().to_ip().ok_or_else(|| anyhow!("server has no IP address"))?;

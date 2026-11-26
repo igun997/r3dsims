@@ -55,12 +55,21 @@ pub struct Tile {
     pub water: bool,
 }
 
+/// Colours of one tile, kept for the clay mesh of the ground.
+#[derive(Clone, Copy, Debug)]
+pub struct TileStyle {
+    pub top: Rgb,
+    pub side: Rgb,
+    pub water: bool,
+}
+
 pub struct Terrain {
     pub w: usize,
     pub d: usize,
     pub cell: f32,
     pub step: f32,
     pub tiles: Vec<Tile>,
+    pub styles: Vec<TileStyle>,
     pub quads: Vec<Quad>,
 }
 
@@ -193,7 +202,8 @@ impl Terrain {
                 }
             }
         }
-        Ok(Terrain { w, d, cell, step, tiles, quads })
+        let styles = tile_look.iter().map(|l| TileStyle { top: l.top, side: l.side, water: l.tile.water }).collect();
+        Ok(Terrain { w, d, cell, step, tiles, styles, quads })
     }
 
     pub fn tile_at(&self, x: f32, z: f32) -> (usize, usize) {

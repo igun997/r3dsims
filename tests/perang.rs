@@ -193,6 +193,7 @@ fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
         out_w: 480,
         out_h: 270,
         pixel: 2,
+        clay: true,
         fps: 20,
         mjpeg: true,
         quality: 70,

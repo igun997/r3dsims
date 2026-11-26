@@ -528,7 +528,16 @@ pub fn war_json() -> Value {
             "gas_air_mata": {"type": "cloud", "radius": 4.0, "secs": 9, "slow": 0.45, "dps": 5, "target": "front", "asset": "gas"},
             "intelijen": {"type": "sabotage", "slow_secs": 8, "slow": 0.6, "structures": true},
             "sogokan": {"type": "convert", "count": 3, "radius": 7.5, "target": "front"},
-            "massa": {"type": "spawn", "unit": "warga", "count": 10, "at": "front"}
+            "massa": {"type": "spawn", "unit": "warga", "count": 10, "at": "front"},
+            "water_cannon_besar": {"type": "push", "strength": 15, "radius": 9, "damage": 30, "target": "front"},
+            "gas_besar": {"type": "cloud", "radius": 6.5, "secs": 10, "slow": 0.4, "dps": 9, "target": "front", "asset": "gas"},
+            "tembakan_gas": {"type": "meteor", "count": 7, "gap": 0.22, "asset": "gas", "radius": 2.8, "damage": 55, "castle_damage": 70, "target": "front"},
+            "dorong_massa": {"type": "push", "strength": 14, "radius": 10, "damage": 30, "target": "front"},
+            "aparat_membelot": {"type": "convert", "count": 5, "radius": 12, "target": "front"},
+            "hujan_botol": {"type": "meteor", "count": 7, "gap": 0.22, "asset": "botol", "radius": 2.6, "damage": 50, "castle_damage": 70, "target": "front", "burn_secs": 5, "burn_dps": 7, "burn_asset": "api"},
+            "maju_aparat": {"type": "chant", "texts": ["MAJU TERTIBKAN!", "AMANKAN LOKASI!", "SIAP KOMANDAN!"], "count": 6, "secs": 3.0, "anim": "cheer", "boost_secs": 10},
+            "panggung_dikepung": {"type": "heal", "amount": -240, "asset": "gas"},
+            "gedung_dikepung": {"type": "heal", "amount": -240, "asset": "api"}
         },
         "gift_aliases": {"mawar": "rose", "donat": "doughnut", "jari hati": "fingerheart", "parfum": "perfume", "singa": "lion", "galaksi": "galaxy", "paus": "whale", "semesta": "universe", "money gun": "moneygun", "uang": "moneygun"},
         "triggers": [
@@ -564,19 +573,33 @@ pub fn war_json() -> Value {
                 ]}
             ],
             "penertiban": [
-                {"do": "announce", "text": "PENERTIBAN! WATER CANNON DAN GAS AIR MATA", "secs": 2.6, "color": "#3f74c4"},
+                {"do": "announce", "text": "PENERTIBAN! WATER CANNON, GAS AIR MATA, TEMBAKAN GAS", "secs": 2.8, "color": "#3f74c4"},
                 {"do": "act", "action": {"type": "cinematic", "pov": "enemy", "secs": 8, "look": "enemy", "fov": 76, "shake": 0.22, "tint": "#2f5fa845", "vignette": 0.55, "bob": 1.2}, "side": "event"},
-                {"do": "wait", "secs": 1.4},
-                {"do": "act", "action": "water_cannon", "side": "A"},
-                {"do": "wait", "secs": 0.9},
-                {"do": "act", "action": "gas_air_mata", "side": "A"}
+                {"do": "act", "action": "maju_aparat", "side": "B"},
+                {"do": "wait", "secs": 1.2},
+                {"do": "act", "action": "water_cannon_besar", "side": "A"},
+                {"do": "wait", "secs": 0.8},
+                {"do": "act", "action": "gas_besar", "side": "A"},
+                {"do": "wait", "secs": 0.6},
+                {"do": "act", "action": "tembakan_gas", "side": "A"},
+                {"do": "act", "action": "panggung_dikepung", "side": "A"},
+                {"do": "wait", "secs": 1.6},
+                {"do": "act", "action": "water_cannon_besar", "side": "A"}
             ],
             "aksi_massa": [
                 {"do": "announce", "text": "{user} MENGGERAKKAN AKSI SERIBU MASSA!", "secs": 2.8, "color": "#f2a31b"},
                 {"do": "act", "action": {"type": "cinematic", "pov": "enemy", "secs": 8, "look": "enemy", "fov": 80, "shake": 0.14, "tint": "#f2a31b30", "vignette": 0.45, "bob": 1.6}, "side": "event"},
-                {"do": "wait", "secs": 1.2},
+                {"do": "wait", "secs": 1.0},
                 {"do": "act", "action": "massa", "side": "A"},
-                {"do": "act", "action": "orasi", "side": "A"}
+                {"do": "act", "action": "orasi", "side": "A"},
+                {"do": "wait", "secs": 0.8},
+                {"do": "act", "action": "dorong_massa", "side": "B"},
+                {"do": "wait", "secs": 0.6},
+                {"do": "act", "action": "hujan_botol", "side": "B"},
+                {"do": "wait", "secs": 1.6},
+                {"do": "act", "action": "aparat_membelot", "side": "B"},
+                {"do": "act", "action": "gedung_dikepung", "side": "B"},
+                {"do": "act", "action": "dorong_massa", "side": "B"}
             ],
             "solidaritas": [
                 {"do": "if", "cond": {"hp_pct_lt": {"side": "A", "value": 25}}, "then": [{"do": "announce", "text": "SOLIDARITAS! WARGA DATANG MEMBANTU", "secs": 2.2, "color": "#f2a31b"}, {"do": "act", "action": "tambah_warga", "side": "A"}, {"do": "act", "action": "orasi", "side": "A"}]},

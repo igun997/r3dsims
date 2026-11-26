@@ -364,6 +364,8 @@ pub struct World {
     pub time: f32,
     /// Temporary offset added to the camera target when rendering (impact shake).
     pub cam_shake: Vec3,
+    /// Draw models and the ground in the clay style (smooth hand-made figures) instead of voxel cubes.
+    pub clay: bool,
     pub nav: Nav,
     pub stages: Vec<StageDef>,
     pub story_loop: bool,
@@ -434,6 +436,7 @@ impl World {
             rig: CameraRig::new(cam),
             time: 0.0,
             cam_shake: Vec3::ZERO,
+            clay: false,
             nav,
             stages: vec![],
             story_loop: false,

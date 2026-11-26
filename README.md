@@ -98,7 +98,7 @@ r3dsims biome malam                             # day / night / desert / snow / 
 r3dsims state                                   # round, support, winner, biome, fps
 ```
 
-Rounds or endless with a winner, per-gift effects, macro scripts and bots, ultimates with their own camera look
+Clay look by default (`--style clay`: smooth hand-made figures; `--style voxel` for blocks). Rounds or endless with a winner, per-gift effects, macro scripts and bots, ultimates with their own camera look
 (ordinary skills never move the camera), biomes, and an autopilot that keeps an empty stream alive. Reference:
 [`docs/LIVE.md`](docs/LIVE.md); skill: `r3dsims-live`.
 

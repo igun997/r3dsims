@@ -13,8 +13,11 @@
 //! * `record`   mp4 (ffmpeg) / gif / png-sequence recorder with social presets
 //! * `templates` Rust-built sample assets and the "kampung" and "rumah" dioramas
 
+#![recursion_limit = "1024"]
+
 pub mod building;
 pub mod camera;
+pub mod clay;
 pub mod client;
 pub mod demo;
 pub mod emoji;

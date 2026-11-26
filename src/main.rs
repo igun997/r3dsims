@@ -156,6 +156,9 @@ struct SizeArgs {
     /// Final pixels per rendered pixel (bigger = chunkier pixel art)
     #[arg(long, default_value_t = 3)]
     pixel: u32,
+    /// voxel (cubes) or clay (smooth hand-made figures)
+    #[arg(long, default_value = "voxel")]
+    style: String,
 }
 
 #[derive(Args)]
@@ -215,6 +218,9 @@ struct LiveArgs {
     /// final pixels per rendered pixel: 1 = fine detail (default), 2 = chunky pixel art, cheaper on the GPU
     #[arg(long, default_value_t = 1)]
     pixel: u32,
+    /// clay (smooth hand-made figures, default) or voxel (cubes)
+    #[arg(long, default_value = "clay")]
+    style: String,
     #[arg(long, default_value_t = 30)]
     fps: u32,
     /// also push the picture to ffmpeg: rtmp://..., srt://..., udp://..., a file, or - for MPEG-TS on stdout
@@ -316,10 +322,19 @@ fn clock(t: f32) -> String {
     format!("{}:{:02}", t as u32 / 60, t as u32 % 60)
 }
 
+fn parse_style(s: &str) -> Result<bool> {
+    match s {
+        "clay" => Ok(true),
+        "voxel" => Ok(false),
+        other => bail!("--style must be clay or voxel (got '{other}')"),
+    }
+}
+
 fn cmd_render(a: RenderArgs) -> Result<()> {
     let out_size = final_size(&a.size)?;
     let (rw, rh) = render_res(out_size, a.size.pixel)?;
     let mut world = World::load(&a.scene)?;
+    world.clay = parse_style(&a.size.style)?;
     if let Some(name) = &a.play {
         world.story = None;
         world.run(Step::PlayScene { name: name.clone() });
@@ -587,6 +602,7 @@ fn cmd_live(a: LiveArgs) -> Result<()> {
         out_w,
         out_h,
         pixel: a.pixel,
+        clay: parse_style(&a.style)?,
         fps: a.fps,
         mjpeg: !a.no_mjpeg,
         quality: a.quality,

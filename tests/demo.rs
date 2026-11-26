@@ -143,6 +143,29 @@ fn only_ultimates_move_the_camera() {
     assert!(world.rig.cam.ortho && (world.rig.cam.target - home.target).length() < 1e-3, "back to the home camera");
 }
 
+fn hp(war: &War, side: &str) -> f64 {
+    war.state_json()["sides"][side]["hp"].as_f64().unwrap()
+}
+
+#[test]
+fn each_ultimate_hits_the_other_camp() {
+    // PENERTIBAN (Galaxy) falls on the citizens, AKSI MASSA (Whale) on the government: the victim's camp loses
+    // health and soldiers, not only the attacker gains something.
+    for (gift_name, victim, other) in [("Galaxy", "A", "B"), ("Whale", "B", "A")] {
+        let (mut world, mut war) = load(&format!("ult_{gift_name}"));
+        war.control(&mut world, "start").unwrap();
+        sim(&mut war, &mut world, 8.0);
+        let (hp0, hp_other0) = (hp(&war, victim), hp(&war, other));
+        let units0 = units(&war, victim);
+        war.handle_event(&mut world, gift(gift_name));
+        sim(&mut war, &mut world, 7.0);
+        let lost = hp0 - hp(&war, victim);
+        assert!(lost >= 150.0, "{gift_name}: the camp of {victim} should lose at least 150 hp, lost {lost}");
+        assert!(hp_other0 - hp(&war, other) < lost, "{gift_name}: the other camp must not suffer more than the victim");
+        assert!(units(&war, victim) < units0 + 6, "{gift_name}: the victim's ranks are thinned: {units0} -> {}", units(&war, victim));
+    }
+}
+
 #[test]
 fn biomes_recolour_ground_sky_and_the_night_gets_dark() {
     let (mut world, mut war) = load("biome");

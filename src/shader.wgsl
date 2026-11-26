@@ -13,6 +13,7 @@ struct Globals {
     sky_bottom: vec4<f32>,
     misc: vec4<f32>,        // time, night glow, ortho (1/0), shadow texel size
     depth: vec4<f32>,       // near, far, width, height
+    style: vec4<f32>,       // x = 1 for the clay style
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -150,19 +151,49 @@ fn shadow_at(p: vec3<f32>) -> f32 {
     return s / 9.0;
 }
 
+// Cheap smooth wobble in -1..1 per axis (the dimples and fingerprints of hand-made clay).
+fn wob(p: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        sin(p.y * 1.7 + sin(p.z * 2.3)),
+        sin(p.z * 1.9 + sin(p.x * 2.1)),
+        sin(p.x * 1.3 + sin(p.y * 2.7)));
+}
+
+// Clay: matte, wrapped soft light, soft shadows, a slightly bumpy surface and a faint warm glow at the terminator.
+fn clay_light(base: vec3<f32>, n0: vec3<f32>, p: vec3<f32>, ao: f32) -> vec3<f32> {
+    let dn = wob(p * 2.3) * 0.65 + wob(p * 5.1 + vec3<f32>(3.1, 1.7, 5.3)) * 0.35;
+    let n = normalize(n0 + dn * 0.12);
+    let tint = 1.0 + 0.04 * dn.x;
+    let l = normalize(g.sun_dir.xyz);
+    let d = dot(n, -l);
+    let wrap = clamp(d * 0.5 + 0.5, 0.0, 1.0);
+    let soft = mix(max(d, 0.0), wrap * wrap, 0.55);
+    let sh = shadow_at(p + n0 * 0.05);
+    let sun_term = soft * mix(0.4, 1.0, sh);
+    let amb = mix(g.ground.xyz, g.ambient.xyz, 0.5 + 0.5 * n.y);
+    let lit = amb * ao * 1.12 + g.sun_color.xyz * sun_term * mix(0.7, 1.0, ao);
+    let sss = pow(clamp(1.0 - abs(d), 0.0, 1.0), 3.0) * 0.07;
+    return base * tint * (lit + vec3<f32>(sss, sss * 0.65, sss * 0.45) * length(g.sun_color.xyz));
+}
+
 @fragment
 fn fs_scene(in: VOut) -> FOut {
     let kind = in.kind_mat & 255u;
     let mat = (in.kind_mat >> 8u) & 255u;
     let n = normalize(in.normal);
     var base = in.color;
-    if (mat != 0u && kind != 1u) {
+    if (mat != 0u && kind != 1u && g.style.x < 0.5) {
         let t = floor(in.uv);
         base = base * pattern(mat, i32(t.x), i32(t.y), in.seed);
     }
     var c: vec3<f32>;
     if (kind == 2u) {
         c = base;
+    } else if (g.style.x > 0.5 && kind != 1u) {
+        c = clay_light(base, n, in.world, in.ao);
+        if (kind == 3u) {
+            c = mix(c, min(base * 1.1, vec3<f32>(1.0)), g.misc.y);
+        }
     } else {
         let l = normalize(g.sun_dir.xyz);
         let ndl = max(dot(n, -l), 0.0);
@@ -249,7 +280,7 @@ fn fs_post(in: FsIn) -> @location(0) vec4<f32> {
         }
     }
     if (best < 1.0e8) {
-        out = textureLoad(scene_color, best_c, 0).rgb * 0.38;
+        out = textureLoad(scene_color, best_c, 0).rgb * select(0.38, 0.72, g.style.x > 0.5);
     }
     let ov = textureLoad(overlay_tex, c, 0);
     out = mix(out, ov.rgb, ov.a);

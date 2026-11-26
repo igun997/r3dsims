@@ -19,7 +19,7 @@ r3dsims live demo/war.json --out rtmp://HOST/app/KEY            # also push H.26
 ```
 
 All other commands take `--server http://HOST:8787 --token SECRET` (or `R3D_SERVER`, `R3D_TOKEN`).
-Pixels are fine by default (`--pixel 1`); `--pixel 2` is chunkier and half the GPU cost. `r3dsims state` shows fps.
+Look: clay by default (`--style clay`, smooth hand-made figures, soft light, no pixel outlines); `--style voxel` for blocks. Resolution is full by default (`--pixel 1`); `--pixel 2` is chunkier and half the GPU cost. `r3dsims state` shows fps.
 
 ## Operate
 
