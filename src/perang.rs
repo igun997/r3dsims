@@ -456,6 +456,19 @@ fn biomes_json() -> Value {
     })
 }
 
+/// A flat glowing ring on the ground (a clay torus once smoothed): cast marks and meteor telegraphs. Palette key `a`
+/// is recoloured with the camp colour.
+pub fn ring_asset() -> AssetDef {
+    let n = 28;
+    let ops = (0..n)
+        .map(|k| {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU;
+            Op::Sphere { at: [11.0 * a.cos(), 1.0, 11.0 * a.sin()], r: 1.05, c: "a".into() }
+        })
+        .collect();
+    AssetDef { name: "ring".into(), voxel: 0.2, palette: pal(&[("a", "#ffffff!")]), parts: vec![part("body", None, [0.0, 0.0, 0.0], ops)], anims: std::collections::BTreeMap::new() }
+}
+
 /// Every asset the scene uses, once each.
 pub fn assets() -> Vec<(String, AssetDef)> {
     let mut out: Vec<(String, AssetDef)> = vec![
@@ -468,6 +481,7 @@ pub fn assets() -> Vec<(String, AssetDef)> {
         ("bolt".into(), bolt()),
         ("shield".into(), shield()),
         ("sparkle".into(), sparkle()),
+        ("ring".into(), ring_asset()),
         ("rock".into(), rock()),
         ("banner".into(), banner()),
         ("tent".into(), tent()),

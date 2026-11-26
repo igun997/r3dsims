@@ -197,6 +197,19 @@ The `perang` template has three: `galaxy` (meteor apocalypse, looks up, orange),
 enemy line back, blue, wide lens), `universe` (a lightning storm, flashes). The `demo` template has `galaxy` (the
 crackdown seen from the government camp) and `whale` (a thousand people marching, seen from the citizens' camp).
 
+### Soldier AI and skill animations
+
+* **Home defence first.** When enemy soldiers get within 7 units of a castle's edge, that camp's nearest soldiers turn
+  back and fight them, the intruder closest to the base first (a few soldiers while the base is only approached; all
+  of them while the castle is being hit or below 40% HP). The rest keep marching on the enemy. No setting needed.
+* **Smart autopilot.** While a camp's base is pressed, the autopilot picks more of the moves that help that camp (heal,
+  reinforce, cheer) and more of the moves that hit its attackers.
+* **Animations.** Soldiers grow in with a little overshoot when they appear. A helpful skill makes its castle swell and
+  settle like a spring and leaves a ring of the camp colour spreading over the ground; a harmful skill makes the target
+  castle shake once. A meteor shows a ring closing on the spot where it will land. The HP bar eases to its new value
+  instead of jumping. Gas clouds grow in with overshoot, drift and shrink away. The ring comes from an asset named `ring`
+  (`fx_assets.ring` to change it; without one the rings are simply not drawn).
+
 ### Biomes
 
 A biome re-skins the world while the war goes on: it recolours terrain tiles (by legend key), sets the sky, swaps scenery

@@ -868,6 +868,10 @@ struct SideState {
     /// seconds of slowdown left, and its speed multiplier (sabotage)
     slow_t: f32,
     slow_f: f32,
+    /// seconds left of "the camp is under attack" (a unit just hit its castle)
+    hit_t: f32,
+    /// castle HP as drawn on the bar: eases toward the real value instead of jumping
+    hp_disp: f32,
 }
 
 #[derive(Clone)]
@@ -900,12 +904,39 @@ enum FxKind {
     Flash { dur: f32, max: f32 },
     Bolt { dur: f32 },
     Rise { dur: f32 },
+    /// expanding (or, with from > to, closing) ground ring: cast marks and meteor telegraphs
+    Ring { dur: f32, from: f32, to: f32 },
 }
 
 struct Fx {
     id: String,
     kind: FxKind,
     t: f32,
+}
+
+/// Enemy soldiers this close to a castle's edge (world units) count as an attack on the base.
+const DEFEND_RANGE: f32 = 7.0;
+
+/// A freshly spawned thing growing in with a little overshoot.
+struct Pop {
+    id: String,
+    t: f32,
+    dur: f32,
+}
+
+/// A castle swelling and settling like a spring when a skill lands on or for its camp.
+struct Bounce {
+    id: String,
+    t: f32,
+    dur: f32,
+    base: f32,
+    amp: f32,
+}
+
+fn ease_out_back(u: f32) -> f32 {
+    let (c1, c3) = (1.70158f32, 2.70158f32);
+    let v = u.clamp(0.0, 1.0) - 1.0;
+    1.0 + c3 * v * v * v + c1 * v * v
 }
 
 enum What {
@@ -1013,6 +1044,8 @@ pub struct War {
     session: Session,
     /// round / match results waiting to be written to the history file
     log: Vec<Value>,
+    pops: Vec<Pop>,
+    bounces: Vec<Bounce>,
     auto_t: f32,
     bot_t: HashMap<String, f32>,
     pub events_seen: u64,
@@ -1084,6 +1117,8 @@ impl War {
             last_round_winner: None,
             session: Session { started_unix: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0), ..Default::default() },
             log: vec![],
+            pops: vec![],
+            bounces: vec![],
             auto_t: 0.0,
             bot_t: HashMap::new(),
             events_seen: 0,
@@ -1324,6 +1359,10 @@ impl War {
         }
         let Some(id) = self.spawn_entity(world, &def.asset, pos, sd.facing, def.scale, def.elevation, palette, "u") else { return false };
         let cd = self.rand() * def.cooldown;
+        self.pops.push(Pop { id: id.clone(), t: 0.0, dur: 0.4 });
+        if let Some(k) = world.entity_idx(&id) {
+            world.entities[k].scale = 0.02;
+        }
         self.units.push(Unit { id, side, pos, hp: def.hp, cd, dying: None, anim_left: 0.0, moving: false, yaw: sd.facing, push: Vec2::ZERO, speech_left: 0.0, def });
         true
     }
@@ -1574,9 +1613,12 @@ impl War {
             c.left -= dt;
             if let Some(i) = world.entity_idx(&c.id) {
                 let age = c.total - c.left;
-                let fade = (age / 0.6).min(1.0).min(c.left.clamp(0.0, 1.0));
+                // grows in with a little overshoot, drifts up and down, shrinks away in the last second
+                let grow = ease_out_back((age / 0.7).min(1.0));
+                let fade = c.left.clamp(0.0, 1.0);
                 let e = &mut world.entities[i];
-                e.scale = (c.radius * (0.55 + 0.45 * fade) * (1.0 + 0.04 * (age * 3.0).sin())).max(0.05);
+                e.scale = (c.radius * (0.15 + 0.85 * grow) * (0.2 + 0.8 * fade) * (1.0 + 0.04 * (age * 3.0).sin())).max(0.05);
+                e.elevation = 0.12 + 0.1 * (age * 1.7).sin();
                 if self.cine_eye.is_some_and(|eye| eye.distance(c.pos) < c.radius + 1.0) {
                     e.scale = 0.01;
                 }
@@ -1590,6 +1632,29 @@ impl War {
             let c = self.clouds.remove(n);
             world.remove(&c.id);
         }
+    }
+
+    fn step_pops(&mut self, world: &mut World, dt: f32) {
+        for p in self.pops.iter_mut() {
+            p.t += dt;
+        }
+        self.pops.retain(|p| p.t < p.dur && world.entity_idx(&p.id).is_some());
+    }
+
+    fn step_bounces(&mut self, world: &mut World, dt: f32) {
+        for b in self.bounces.iter_mut() {
+            b.t += dt;
+            let u = (b.t / b.dur).min(1.0);
+            if let Some(i) = world.entity_idx(&b.id) {
+                world.entities[i].scale = b.base * (1.0 + b.amp * (-4.5 * u).exp() * (u * std::f32::consts::TAU * 2.0).sin());
+            }
+        }
+        for b in self.bounces.iter().filter(|b| b.t >= b.dur) {
+            if let Some(i) = world.entity_idx(&b.id) {
+                world.entities[i].scale = b.base;
+            }
+        }
+        self.bounces.retain(|b| b.t < b.dur);
     }
 
     // ------------------------------------------------------------ biomes
@@ -1658,13 +1723,14 @@ impl War {
     fn autopilot_move(&mut self, world: &mut World, ap: &Autopilot) {
         let ctx = Ctx::default();
         if !ap.actions.is_empty() {
-            let total: f32 = ap.actions.iter().map(|m| m.weight.max(0.0)).sum();
+            let weights: Vec<f32> = ap.actions.iter().map(|m| self.smart_weight(world, m)).collect();
+            let total: f32 = weights.iter().sum();
             if total <= 0.0 {
                 return;
             }
             let mut r = self.rand() * total;
-            for m in &ap.actions {
-                r -= m.weight.max(0.0);
+            for (m, w) in ap.actions.iter().zip(&weights) {
+                r -= w;
                 if r <= 0.0 {
                     let side = self.resolve_side(&m.side, &ctx);
                     let label = match &m.action {
@@ -1739,7 +1805,85 @@ impl War {
                 }
             },
         };
+        self.react(world, &a, side);
         self.run_action(world, &a, side, ctx);
+    }
+
+    /// The camp a skill is for (helpful) or lands on (harmful) answers it: the castle swells and settles like a
+    /// spring, and a helpful skill leaves a ring spreading over the ground.
+    fn react(&mut self, world: &mut World, a: &Action, side: usize) {
+        if !matches!(self.phase, Phase::Fighting) {
+            return;
+        }
+        let (helpful, harmful) = match a {
+            Action::Spawn { .. } | Action::Chant { .. } | Action::Shield { .. } | Action::Boost { .. } => (true, false),
+            Action::Heal { amount, .. } => (*amount > 0.0, *amount <= 0.0),
+            Action::Meteor { .. } | Action::Arrows { .. } | Action::Lightning { .. } | Action::Push { .. } | Action::Cloud { .. } | Action::Convert { .. } | Action::Sabotage { .. } => (false, true),
+            _ => (false, false),
+        };
+        if helpful {
+            self.bounce_castle(world, side, 0.06);
+            let (cp, r, col) = (self.castle_pos(world, side), self.side_def(side).castle_radius, self.side_color(side));
+            self.ring_fx(world, cp, &col, r * 0.4, r * 1.7, 0.9);
+        } else if harmful {
+            self.bounce_castle(world, side, 0.03);
+        }
+    }
+
+    fn bounce_castle(&mut self, world: &World, side: usize, amp: f32) {
+        let id = self.side_def(side).castle.clone();
+        if let Some(b) = self.bounces.iter_mut().find(|b| b.id == id) {
+            b.t = 0.0;
+            b.amp = amp;
+            return;
+        }
+        if let Some(k) = world.entity_idx(&id) {
+            self.bounces.push(Bounce { id, t: 0.0, dur: 0.7, base: world.entities[k].scale, amp });
+        }
+    }
+
+    /// A glowing ring on the ground (needs a `ring` asset; without one nothing is drawn).
+    fn ring_fx(&mut self, world: &mut World, at: Vec2, color: &str, from: f32, to: f32, dur: f32) {
+        let name = self.asset("ring");
+        if !world.models.contains_key(&name) || self.fx.len() > 90 {
+            return;
+        }
+        let mut pal = BTreeMap::new();
+        pal.insert("a".to_string(), color.to_string());
+        if let Some(id) = self.spawn_entity(world, &name, at, 0.0, from.max(0.05), 0.06, pal, "fx") {
+            self.fx.push(Fx { id, kind: FxKind::Ring { dur, from, to }, t: 0.0 });
+        }
+    }
+
+    /// How hard a camp is pressed: enemy soldiers at its gate (up to 3) plus one when its castle is below 40%.
+    fn base_danger(&self, world: &World, s: usize) -> f32 {
+        let c = self.castle_pos(world, s);
+        let r = self.side_def(s).castle_radius;
+        let n = self.units.iter().filter(|u| u.side == 1 - s && u.dying.is_none() && !u.def.structure && u.pos.distance(c) - r <= DEFEND_RANGE).count() as f32;
+        n.min(3.0) + if self.sides[s].hp / self.def.castle_hp < 0.4 { 1.0 } else { 0.0 }
+    }
+
+    /// Autopilot weight of one move: a camp whose base is pressed gets more of the moves that help it (heal, reinforce,
+    /// cheer) and more of the moves that hit its attackers.
+    fn smart_weight(&self, world: &World, m: &AutoMove) -> f32 {
+        let base = m.weight.max(0.0);
+        let Some(side) = side_idx(&m.side).or_else(|| self.side_lookup(&m.side)) else { return base };
+        let act = match &m.action {
+            ActionRef::Inline(a) => Some((**a).clone()),
+            ActionRef::Name(n) => self.def.actions.get(n).cloned(),
+        };
+        let Some(act) = act else { return base };
+        let helpful = match &act {
+            Action::Spawn { .. } | Action::Chant { .. } | Action::Shield { .. } | Action::Boost { .. } => Some(true),
+            Action::Heal { amount, .. } => Some(*amount > 0.0),
+            Action::Meteor { .. } | Action::Arrows { .. } | Action::Lightning { .. } | Action::Push { .. } | Action::Cloud { .. } | Action::Convert { .. } | Action::Sabotage { .. } => Some(false),
+            _ => None,
+        };
+        match helpful {
+            Some(true) => base * (1.0 + 3.0 * self.base_danger(world, side)),
+            Some(false) => base * (1.0 + 2.0 * self.base_danger(world, 1 - side)),
+            None => base,
+        }
     }
 
     fn schedule(&mut self, delay: f32, side: usize, what: What) {
@@ -2145,7 +2289,8 @@ impl War {
             v.insert(format!("name.{k}"), self.side_name(s));
             v.insert(format!("color.{k}"), self.side_color(s));
             v.insert(format!("hp.{k}"), (self.sides[s].hp.ceil() as i64).to_string());
-            v.insert(format!("hp_frac.{k}"), format!("{:.4}", (self.sides[s].hp / self.def.castle_hp).clamp(0.0, 1.0)));
+            let shown = if self.sides[s].hp_disp > 0.0 { self.sides[s].hp_disp } else { self.sides[s].hp };
+            v.insert(format!("hp_frac.{k}"), format!("{:.4}", (shown / self.def.castle_hp).clamp(0.0, 1.0)));
             v.insert(format!("units.{k}"), self.alive(s).to_string());
             v.insert(format!("wins.{k}"), self.sides[s].wins.to_string());
             v.insert(format!("losses.{k}"), self.sides[1 - s].wins.to_string());
@@ -2416,6 +2561,8 @@ impl War {
             self.run_jobs(world);
             self.step_fx(world, dt);
             self.step_clouds(world, dt);
+            self.step_pops(world, dt);
+            self.step_bounces(world, dt);
             self.step_dying(world, dt);
         }
         self.run_runners(dt, world);
@@ -2429,6 +2576,12 @@ impl War {
             s.shield = (s.shield - dt).max(0.0);
             s.boost = (s.boost - dt).max(0.0);
             s.slow_t = (s.slow_t - dt).max(0.0);
+            s.hit_t = (s.hit_t - dt).max(0.0);
+            if s.hp_disp <= 0.0 {
+                s.hp_disp = s.hp;
+            } else {
+                s.hp_disp += (s.hp - s.hp_disp) * (1.0 - (-5.0 * dt).exp());
+            }
         }
         if let Some(a) = self.def.autospawn.clone() {
             self.auto_t += dt;
@@ -2505,6 +2658,9 @@ impl War {
                     let asset = self.asset(key);
                     let dur = self.range(0.9, 1.25);
                     let from = Vec3::new(to.x - 5.0, 22.0, to.y - 2.0);
+                    let col = self.side_color(side);
+                    // telegraph: a ring closes on the spot where it will land
+                    self.ring_fx(world, to, &col, radius * scale.max(0.5) * 1.5, radius * scale.max(0.5) * 0.7, dur);
                     if let Some(id) = self.spawn_entity(world, &asset, Vec2::new(from.x, from.z), 0.0, scale, from.y, BTreeMap::new(), "fx") {
                         self.fx.push(Fx { id, kind: FxKind::Fall { from, to, dur, land: Land::Meteor { side, radius: radius * scale.max(0.5), dmg, cdmg, ff, burn } }, t: 0.0 });
                     }
@@ -2592,6 +2748,19 @@ impl War {
                         done.push(f.id.clone());
                     }
                 }
+                FxKind::Ring { dur, from, to } => {
+                    let u = (f.t / dur).min(1.0);
+                    let s = if u < 0.75 {
+                        let v = u / 0.75;
+                        from + (to - from) * (1.0 - (1.0 - v).powi(3))
+                    } else {
+                        to * (1.0 - (u - 0.75) / 0.25).max(0.02)
+                    };
+                    e.scale = s.max(0.02);
+                    if u >= 1.0 {
+                        done.push(f.id.clone());
+                    }
+                }
             }
         }
         for id in &done {
@@ -2647,6 +2816,45 @@ impl War {
         let castles = [self.castle_pos(world, 0), self.castle_pos(world, 1)];
         let radii = [self.side_def(0).castle_radius, self.side_def(1).castle_radius];
         let snapshot: Vec<(usize, Vec2, bool)> = self.units.iter().map(|u| (u.side, u.pos, u.dying.is_none())).collect();
+        let is_struct: Vec<bool> = self.units.iter().map(|u| u.def.structure).collect();
+        // Home defence comes first: enemy soldiers close to a camp's base are that camp's priority. The
+        // soldiers nearest the intruder defend (all of them while the castle is being hit or below 40%),
+        // the rest keep marching on the enemy.
+        let mut defend: [Option<Vec2>; 2] = [None, None];
+        let mut defenders = vec![false; n];
+        for s in 0..2 {
+            if self.sides[s].destroyed.is_some() {
+                continue;
+            }
+            let mut threats: Vec<(Vec2, f32)> = vec![];
+            let mut mine = 0usize;
+            for (j, (sj, pj, aj)) in snapshot.iter().enumerate() {
+                if !*aj || is_struct[j] {
+                    continue;
+                }
+                if *sj == s {
+                    mine += 1;
+                } else {
+                    let d = pj.distance(castles[s]) - radii[s];
+                    if d <= DEFEND_RANGE {
+                        threats.push((*pj, d));
+                    }
+                }
+            }
+            if threats.is_empty() {
+                continue;
+            }
+            threats.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let under_fire = self.sides[s].hit_t > 0.0 || self.sides[s].hp / self.def.castle_hp < 0.4;
+            let want = if under_fire { mine } else { (threats.len() * 2 + 1).min(mine) };
+            let tp = threats[0].0;
+            defend[s] = Some(tp);
+            let mut ours: Vec<(usize, f32)> = (0..n).filter(|&j| snapshot[j].0 == s && snapshot[j].2 && !is_struct[j]).map(|j| (j, snapshot[j].1.distance(tp))).collect();
+            ours.sort_by(|a, b| a.1.total_cmp(&b.1));
+            for (j, _) in ours.into_iter().take(want) {
+                defenders[j] = true;
+            }
+        }
         let mut hits: Vec<(usize, f32)> = vec![];
         let mut castle_hits: Vec<(usize, f32)> = vec![];
         let mut shots: Vec<(Vec2, Vec2)> = vec![];
@@ -2719,7 +2927,31 @@ impl War {
             let mut moving = false;
             let mut face: Option<Vec2> = None;
             let mut attack: Option<(Option<usize>, bool)> = None; // (unit target, castle target)
-            if let Some((j, d)) = near.filter(|(_, d)| *d <= def.range) {
+            if defenders[i] {
+                // the intruder closest to the base is hit first, whoever is nearer to this soldier
+                let tp = defend[side].unwrap_or(pos);
+                let mut tgt: Option<(usize, f32)> = None;
+                for (j, (s, p, alive)) in snapshot.iter().enumerate() {
+                    if *s == enemy && *alive && p.distance(pos) <= def.range {
+                        let dh = p.distance(castles[side]);
+                        if tgt.is_none_or(|b| dh < b.1) {
+                            tgt = Some((j, dh));
+                        }
+                    }
+                }
+                if let Some((j, _)) = tgt {
+                    attack = Some((Some(j), false));
+                    face = Some(snapshot[j].1);
+                } else {
+                    let dir = (tp - pos).normalize_or_zero();
+                    if dir != Vec2::ZERO {
+                        let step = def.speed * boost_s * speed_mod * 1.2 * dt;
+                        self.units[i].pos += dir * step.min(pos.distance(tp));
+                        moving = true;
+                        face = Some(tp);
+                    }
+                }
+            } else if let Some((j, d)) = near.filter(|(_, d)| *d <= def.range) {
                 let _ = d;
                 attack = Some((Some(j), false));
                 face = Some(snapshot[j].1);
@@ -2810,6 +3042,7 @@ impl War {
             }
         }
         for (s, d) in castle_hits {
+            self.sides[s].hit_t = 3.0;
             self.hit_castle(s, d);
         }
         for (from, to) in shots {
@@ -2908,7 +3141,8 @@ impl War {
                     e.yaw = u.yaw;
                     e.moving = u.moving;
                     let boosted = self.sides[u.side].boost > 0.0;
-                    e.scale = u.def.scale * if boosted { 1.18 } else { 1.0 };
+                    let pop = self.pops.iter().find(|p| p.id == u.id).map_or(1.0, |p| ease_out_back(p.t / p.dur).max(0.02));
+                    e.scale = u.def.scale * if boosted { 1.18 } else { 1.0 } * pop;
                 }
             }
         }
@@ -3349,5 +3583,102 @@ fn check_action(a: &Action, def: &WarDef, errs: &mut Vec<String>, ctx: &str) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(tag: &str) -> (World, War) {
+        let dir = std::env::temp_dir().join(format!("r3d_war_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::demo::write(&dir).unwrap();
+        War::load(&dir.join("war.json")).unwrap()
+    }
+
+    fn sim(war: &mut War, world: &mut World, secs: f32) {
+        let dt = 1.0 / 30.0;
+        for _ in 0..(secs / dt) as usize {
+            war.update(dt, world);
+            world.update(dt);
+        }
+    }
+
+    /// Three soldiers of the enemy of `side` standing at its gate.
+    fn intruders(war: &mut War, world: &World, side: usize) {
+        let gate = war.castle_pos(world, side);
+        let r = war.side_def(side).castle_radius;
+        let mut put = 0;
+        for u in war.units.iter_mut() {
+            if u.side == 1 - side && !u.def.structure && put < 3 {
+                u.pos = gate + Vec2::new((r + 1.0) * if side == 0 { 1.0 } else { -1.0 }, put as f32 * 0.7);
+                put += 1;
+            }
+        }
+        assert_eq!(put, 3, "the template starts with enough soldiers");
+    }
+
+    #[test]
+    fn soldiers_drop_the_offensive_to_defend_a_castle_under_attack() {
+        let (mut world, mut war) = load("defend");
+        war.control(&mut world, "start").unwrap();
+        sim(&mut war, &mut world, 3.0);
+        let gate = war.castle_pos(&world, 0);
+        // A's soldiers are out in the field, three of B's are at A's gate
+        for u in war.units.iter_mut() {
+            if u.side == 0 && !u.def.structure {
+                u.pos = gate + Vec2::new(14.0, (u.pos.y - gate.y).clamp(-3.0, 3.0));
+            }
+        }
+        intruders(&mut war, &world, 0);
+        let dist = |war: &War| -> f32 {
+            let v: Vec<f32> = war.units.iter().filter(|u| u.side == 0 && !u.def.structure && u.dying.is_none()).map(|u| u.pos.distance(gate)).collect();
+            v.iter().sum::<f32>() / v.len() as f32
+        };
+        let before = dist(&war);
+        war.sides[0].hit_t = 3.0; // the castle is being hit: everybody comes home
+        sim(&mut war, &mut world, 1.5);
+        let after = dist(&war);
+        assert!(after < before - 1.5, "A's soldiers should run back to the base: {before} -> {after}");
+    }
+
+    #[test]
+    fn a_pressed_camp_gets_more_defensive_autopilot_moves() {
+        let (mut world, mut war) = load("smartap");
+        war.control(&mut world, "start").unwrap();
+        sim(&mut war, &mut world, 3.0);
+        let ap = war.def.autopilot.clone().unwrap();
+        let m = ap.actions.iter().find(|m| matches!(&m.action, ActionRef::Name(n) if n == "nasi_bungkus")).expect("a heal move on A");
+        let calm = war.smart_weight(&world, m);
+        intruders(&mut war, &world, 0);
+        let pressed = war.smart_weight(&world, m);
+        assert!(pressed > calm * 3.0, "healing weight {calm} -> {pressed}");
+        // and a move that hits A's attackers (it lands on B) also gains
+        let hit = ap.actions.iter().find(|m| matches!(&m.action, ActionRef::Name(n) if n == "molotov")).expect("a molotov move");
+        assert!(war.smart_weight(&world, hit) > hit.weight);
+    }
+
+    #[test]
+    fn new_soldiers_grow_in_and_the_hp_bar_eases() {
+        let (mut world, mut war) = load("fluent");
+        war.control(&mut world, "start").unwrap();
+        sim(&mut war, &mut world, 3.0);
+        war.control(&mut world, "run:massa:A").unwrap();
+        sim(&mut war, &mut world, 0.1);
+        let u = war.units.last().unwrap();
+        let (id, target) = (u.id.clone(), u.def.scale);
+        let s = |world: &World| world.entities[world.entity_idx(&id).unwrap()].scale;
+        assert!(s(&world) < target * 0.9, "a new soldier starts small: {} of {target}", s(&world));
+        sim(&mut war, &mut world, 0.6);
+        assert!((s(&world) - target).abs() < 0.02, "and settles at its size: {} vs {target}", s(&world));
+
+        let real = |war: &War| war.sides[0].hp / war.def.castle_hp;
+        let shown = |war: &War| war.vars()["hp_frac.A"].parse::<f32>().unwrap();
+        war.control(&mut world, "run:panggung_dikepung:A").unwrap();
+        sim(&mut war, &mut world, 0.1);
+        assert!(shown(&war) > real(&war) + 0.05, "the bar lags behind a hit: shown {} real {}", shown(&war), real(&war));
+        sim(&mut war, &mut world, 2.5);
+        assert!((shown(&war) - real(&war)).abs() < 0.02, "and catches up: shown {} real {}", shown(&war), real(&war));
     }
 }
