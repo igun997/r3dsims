@@ -1,0 +1,17 @@
+{
+  "name": "nasi",
+  "voxel": 0.1599999964237213,
+  "palette": {"leaf":"#4e9a45","paper":"#b88a55","rice":"#fffaf0","tali":"#e8e0d0"},
+  "parts": [
+    {
+      "name": "body",
+      "pivot": [0.0,3.0,0.0],
+      "shape": [
+        {"op":"box","at":[-5,0,-4],"size":[10,6,8],"c":"paper"},
+        {"op":"box","at":[-5,5,-4],"size":[10,1,8],"c":"leaf"},
+        {"op":"box","at":[-4,6,-3],"size":[8,2,6],"c":"rice"},
+        {"op":"box","at":[-5,2,-1],"size":[10,1,2],"c":"tali"}
+      ]
+    }
+  ]
+}

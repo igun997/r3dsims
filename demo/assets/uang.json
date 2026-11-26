@@ -1,0 +1,17 @@
+{
+  "name": "uang",
+  "voxel": 0.1599999964237213,
+  "palette": {"band":"#e8e0d0","bill":"#5fae52","bill2":"#7cc46d","gold":"#f2c230!"},
+  "parts": [
+    {
+      "name": "body",
+      "pivot": [0.0,3.0,0.0],
+      "shape": [
+        {"op":"box","at":[-5,0,-3],"size":[10,2,6],"c":"bill"},
+        {"op":"box","at":[-5,2,-3],"size":[10,2,6],"c":"bill2"},
+        {"op":"box","at":[-1,0,-3],"size":[2,4,6],"c":"band"},
+        {"op":"sphere","at":[7.0,4.0,0.0],"r":3.0,"c":"gold"}
+      ]
+    }
+  ]
+}

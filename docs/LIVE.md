@@ -156,22 +156,23 @@ Name them under `actions` and use the name, or write the action inline in the tr
 ### Camera effects: ultimates only
 
 Ordinary skills never move the camera. An **ultimate** is a macro that includes a `cinematic` action: the camera swoops
-from the broadcast view into the eyes of a soldier in one camp (`pov`: `enemy`, the side opposite the action's side, by
-default; `self`, `A`, `B`), stays for `secs`, and swoops back. What the viewer sees depends on the parameters you
-give each ultimate:
+from the broadcast view into the **point of view of a camp**: raised above the gate of that side's objective, looking
+out over the field and slowly sweeping (`pov`: `enemy`, the camp opposite the action's side, by default, so the attacker's
+camp sees the damage land; `self`, `A`, `B`), stays for `secs`, and swoops back. The viewpoint is the camp, not a person.
+What the viewer sees depends on the parameters you give each ultimate:
 
 | field | effect |
 | --- | --- |
 | `look` | `enemy` straight ahead (default), `sky` looking up (meteors, lightning), `castle` at the enemy objective; `pitch` overrides |
-| `fov`, `bob` | wide or tight lens, head bob while the soldier walks |
+| `fov` | wide or tight lens |
 | `shake` | camera shake (an earthquake feel) |
 | `tint`, `vignette` | a colour wash (`#rrggbbaa`) and darkened edges: blue for a tsunami, orange for fire, yellow for a crowd |
 | `flashes` | white lightning flashes per second |
-| `unit` | `front` (a soldier near the enemy line, default), `random`, `castle` (stand at the gate) |
+| `unit` | `camp` (default). `front` / `random` ride one soldier of that camp instead, with `bob` (head bob) |
 
 The `perang` template has three: `galaxy` (meteor apocalypse, looks up, orange), `whale` (a tsunami pushing the whole
 enemy line back, blue, wide lens), `universe` (a lightning storm, flashes). The `demo` template has `galaxy` (the
-crackdown seen through a policeman's eyes) and `whale` (a thousand people marching, seen from inside the crowd).
+crackdown seen from the government camp) and `whale` (a thousand people marching, seen from the citizens' camp).
 
 ### Biomes
 

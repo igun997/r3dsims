@@ -332,7 +332,8 @@ pub enum Action {
         bob: f32,
         #[serde(default)]
         shake: f32,
-        /// front (a soldier near the enemy line, default), random, castle (stand at the gate)
+        /// camp (default): the camera sits at the camp, above the gate of that side's objective, and sweeps slowly over
+        /// the field. front / random: ride a soldier of that camp instead (head bob applies).
         #[serde(default)]
         unit: String,
         /// full-screen colour `#rrggbbaa`
@@ -1358,7 +1359,7 @@ impl War {
         let mut cands: Vec<usize> = (0..self.units.len())
             .filter(|&i| self.units[i].side == pov && self.units[i].dying.is_none() && !self.units[i].def.structure && self.units[i].pos.distance(enemy) >= 10.0)
             .collect();
-        if cands.is_empty() || mode == "castle" {
+        if cands.is_empty() || matches!(mode, "" | "camp" | "castle") {
             return None;
         }
         let i = if mode == "random" {
@@ -1387,11 +1388,12 @@ impl War {
                 (Vec3::new(u.pos.x, hy + 0.3, u.pos.y) + f * 0.55, u.yaw)
             }
             None => {
+                // the camp itself: raised above the gate of its objective, slowly sweeping the field
                 let cp = self.castle_pos(world, c.pov);
-                let facing = self.side_def(c.pov).facing;
-                let gy = world.terrain.height_at(cp.x, cp.y) + 2.4;
+                let facing = self.side_def(c.pov).facing + 9.0 * (c.t * 0.5).sin();
+                let gy = world.terrain.height_at(cp.x, cp.y) + 3.6;
                 let f = Vec3::new(facing.to_radians().sin(), 0.0, facing.to_radians().cos());
-                (Vec3::new(cp.x, gy, cp.y) + f * (self.side_def(c.pov).castle_radius + 0.8), facing)
+                (Vec3::new(cp.x, gy, cp.y) + f * (self.side_def(c.pov).castle_radius + 0.6 + 0.5 * (c.t * 0.7).sin()), facing)
             }
         };
         let t = c.t;
@@ -1404,7 +1406,7 @@ impl War {
             "sky" => (yaw_u + 180.0, c.pitch.unwrap_or(-30.0)),
             _ => (yaw_u + 180.0, c.pitch.unwrap_or(6.0)),
         };
-        if c.bob > 0.0 {
+        if c.bob > 0.0 && c.unit.is_some() {
             p += c.bob * if moving { 1.0 } else { 0.3 } * 0.9 * (t * 9.0).sin();
         }
         y = home_p.yaw + wrap180(y - home_p.yaw);
@@ -3246,8 +3248,8 @@ fn check_action(a: &Action, def: &WarDef, errs: &mut Vec<String>, ctx: &str) {
             if !matches!(look.as_str(), "" | "enemy" | "sky" | "castle") {
                 errs.push(format!("{ctx}: cinematic look must be enemy, sky or castle (got '{look}')"));
             }
-            if !matches!(unit.as_str(), "" | "front" | "random" | "castle") {
-                errs.push(format!("{ctx}: cinematic unit must be front, random or castle (got '{unit}')"));
+            if !matches!(unit.as_str(), "" | "camp" | "castle" | "front" | "random") {
+                errs.push(format!("{ctx}: cinematic unit must be camp, front or random (got '{unit}')"));
             }
         }
         Action::Biome { name } if name != "random" && !def.biomes.contains_key(name) => errs.push(format!("{ctx}: unknown biome '{name}'")),

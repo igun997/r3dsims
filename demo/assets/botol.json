@@ -1,0 +1,19 @@
+{
+  "name": "botol",
+  "voxel": 0.10000000149011612,
+  "palette": {"flame":"#ff7a1a!","flame2":"#ffd24a!","glass":"#6fbf73","rag":"#e8e0d0"},
+  "parts": [
+    {
+      "name": "body",
+      "pivot": [0.0,6.0,0.0],
+      "shape": [
+        {"op":"box","at":[-2,0,-2],"size":[4,8,4],"c":"glass"},
+        {"op":"box","at":[-1,8,-1],"size":[2,4,2],"c":"glass"},
+        {"op":"box","at":[-1,12,-1],"size":[2,2,2],"c":"rag"},
+        {"op":"box","at":[-2,14,-2],"size":[4,4,4],"c":"flame"},
+        {"op":"box","at":[-1,18,-1],"size":[2,4,2],"c":"flame2"},
+        {"op":"box","at":[-3,15,-1],"size":[2,3,2],"c":"flame"}
+      ]
+    }
+  ]
+}

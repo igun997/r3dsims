@@ -1,6 +1,6 @@
 ---
 name: r3dsims-live
-description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by webhooks: gifts, likes and comments become effects, ultimates get first-person camera effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state. The platform connector is a separate app.
+description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by webhooks: gifts, likes and comments become effects, ultimates get a camp point-of-view camera with their own effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state. The platform connector is a separate app.
 ---
 
 # r3dsims live

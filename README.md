@@ -4,7 +4,7 @@ A scriptable voxel-pixel diorama sandbox in Rust, rendered on the GPU (wgpu). As
 modular JSON (or Rust-built) voxel models with procedural materials, behaviour is story scenes, the
 camera takes events from a person or an agent, and the result can be watched live (Rune GPU UI),
 rendered/recorded headless for Instagram, or **streamed live with webhooks**: gifts, likes and comments from a
-platform connector turn into meteors, speeches, water cannons or first-person ultimates in a war between two sides.
+platform connector turn into meteors, speeches, water cannons or camp-point-of-view ultimates in a war between two sides.
 
 Sample dioramas, from simple to complex (the last two are for `r3dsims live`):
 
@@ -13,7 +13,7 @@ Sample dioramas, from simple to complex (the last two are for `r3dsims live`):
 | `kampung` | island village: houses, palms, well, stall, four villagers, day to night |
 | `rumah` | roofless two-storey dollhouse: cut-away walls, stairs, furniture, exploded floors |
 | `pelabuhan` | **complex**: fishing harbour with dock and boats, lighthouse on a hill, kampung houses, a three-storey guesthouse (two stair runs, lobby, rooms, rooftop terrace), a fisherman's hut, 72 entities (furniture, people, boats, trees), a 58 s story that walks a tourist from the beach to the rooftop |
-| `perang` | **live**: two kingdoms side by side, rounds, castles, knights/archers/giants, meteors, lightning, arrow rain, ultimates with first-person camera, four biomes |
+| `perang` | **live**: two kingdoms side by side, rounds, castles, knights/archers/giants, meteors, lightning, arrow rain, ultimates seen from a camp's point of view, four biomes |
 | `demo` | **live**: a parody street demonstration, citizens vs government, endless day and night: speeches raise morale, rice packs heal, barricades, molotov bottles, water cannon, tear gas, foreign aid or corruption, intelligence sabotage, bribes that turn protesters, ultimates |
 
 ## Screenshots
@@ -102,22 +102,22 @@ Rounds or endless with a winner, per-gift effects, macro scripts and bots, ultim
 (ordinary skills never move the camera), biomes, and an autopilot that keeps an empty stream alive. Reference:
 [`docs/LIVE.md`](docs/LIVE.md); skill: `r3dsims-live`.
 
-`demo` (citizens vs government), day and night, and the two ultimates seen first-person from each camp:
+`demo` (citizens vs government), day and night, and the two ultimates seen from the point of view of each camp:
 
 <p align="center">
 <img src="docs/images/live-demo-day.jpg" alt="demo, day" width="49%">
 <img src="docs/images/live-demo-night.jpg" alt="demo, night biome" width="49%">
-<img src="docs/images/live-demo-fpv-police.jpg" alt="demo, ultimate seen through a policeman's eyes" width="49%">
-<img src="docs/images/live-demo-fpv-crowd.jpg" alt="demo, ultimate seen from inside the crowd" width="49%">
+<img src="docs/images/live-demo-fpv-police.jpg" alt="demo, ultimate seen from the government camp" width="49%">
+<img src="docs/images/live-demo-fpv-crowd.jpg" alt="demo, ultimate seen from the citizens' camp" width="49%">
 </p>
 
 `perang` (two kingdoms): a battle, the whale ultimate (blue tsunami), the lava biome, the galaxy ultimate (looks up at the meteors):
 
 <p align="center">
 <img src="docs/images/live-perang-battle.jpg" alt="perang, battle" width="49%">
-<img src="docs/images/live-perang-whale-fpv.jpg" alt="perang, whale ultimate first person" width="49%">
+<img src="docs/images/live-perang-whale-fpv.jpg" alt="perang, whale ultimate from a camp" width="49%">
 <img src="docs/images/live-perang-lava.jpg" alt="perang, lava biome" width="49%">
-<img src="docs/images/live-perang-galaxy-fpv.jpg" alt="perang, galaxy ultimate first person" width="49%">
+<img src="docs/images/live-perang-galaxy-fpv.jpg" alt="perang, galaxy ultimate from a camp" width="49%">
 </p>
 
 ## Agent skills

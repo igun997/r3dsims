@@ -1,0 +1,34 @@
+{
+  "name": "banner",
+  "voxel": 0.11999999731779099,
+  "palette": {"cloth":"#e0453a:fabric","pole":"#6b4423:wood","trim":"#f2d16b"},
+  "parts": [
+    {
+      "name": "pole",
+      "pivot": [0.0,0.0,0.0],
+      "shape": [
+        {"op":"box","at":[0,0,0],"size":[1,26,1],"c":"pole"},
+        {"op":"box","at":[-1,26,-1],"size":[3,2,3],"c":"trim"}
+      ]
+    },
+    {
+      "name": "flag",
+      "parent": "pole",
+      "pivot": [1.0,24.0,0.0],
+      "shape": [
+        {"op":"box","at":[1,16,0],"size":[10,8,1],"c":"cloth"},
+        {"op":"box","at":[1,16,0],"size":[10,1,1],"c":"trim"},
+        {"op":"box","at":[1,23,0],"size":[10,1,1],"c":"trim"},
+        {"op":"box","at":[5,19,0],"size":[2,2,1],"c":"trim"}
+      ]
+    }
+  ],
+  "anims": {
+    "idle": {
+      "duration": 1.600000023841858,
+      "loop": true,
+      "ease": "smooth",
+      "tracks": {"flag":{"rot":[[0.0,[0.0,8.0,0.0]],[0.800000011920929,[0.0,-8.0,0.0]]]}}
+    }
+  }
+}

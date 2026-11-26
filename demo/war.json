@@ -1,0 +1,790 @@
+{
+  "title": "DEMO RAKYAT VS PEMERINTAH",
+  "scene": "scene.json",
+  "castle_hp": 1000,
+  "match": {
+    "mode": "endless",
+    "round_secs": 75,
+    "lobby_secs": 5,
+    "intermission": 6
+  },
+  "initial_units": 5,
+  "autospawn": {
+    "every": 6.0,
+    "count": 1
+  },
+  "max_units": 40,
+  "texts": {
+    "round": "HARI KE-{round}",
+    "round_win": "{name} MENANG HARI INI!",
+    "match_win": "{name} JUARA!",
+    "draw": "SERI, SAMA-SAMA CAPEK",
+    "match_draw": "SERI",
+    "label_hp": "DUKUNGAN",
+    "label_units": "MASSA",
+    "label_wins": "MENANG",
+    "label_round": "HARI",
+    "hint": "MODE OTOMATIS: KIRIM GIFT BIAR RAMAI!"
+  },
+  "sides": {
+    "A": {
+      "name": "RAKYAT",
+      "color": "#f2a31b",
+      "castle": "panggung",
+      "spawn": [
+        12.5,
+        15.0
+      ],
+      "unit": "warga",
+      "facing": 90,
+      "castle_radius": 3.0,
+      "zone": [
+        4.0,
+        4.0,
+        25.0,
+        26.0
+      ]
+    },
+    "B": {
+      "name": "PEMERINTAH",
+      "color": "#3f74c4",
+      "castle": "gedung",
+      "spawn": [
+        39.5,
+        15.0
+      ],
+      "unit": "polisi",
+      "facing": 270,
+      "castle_radius": 3.2,
+      "zone": [
+        27.0,
+        4.0,
+        48.0,
+        26.0
+      ]
+    }
+  },
+  "units": {
+    "warga": {
+      "asset": "warga",
+      "hp": 40,
+      "speed": 1.8,
+      "dmg": 4,
+      "range": 1.2,
+      "cooldown": 1.0,
+      "defeat_anim": "faint"
+    },
+    "mahasiswa": {
+      "asset": "mahasiswa",
+      "hp": 30,
+      "speed": 2.4,
+      "dmg": 3,
+      "range": 1.2,
+      "cooldown": 0.8,
+      "defeat_anim": "faint"
+    },
+    "polisi": {
+      "asset": "polisi",
+      "hp": 55,
+      "speed": 1.7,
+      "dmg": 6,
+      "range": 1.4,
+      "cooldown": 1.1,
+      "castle_mult": 0.5,
+      "defeat_anim": "faint"
+    },
+    "barikade": {
+      "asset": "barikade",
+      "hp": 220,
+      "speed": 0,
+      "dmg": 0,
+      "structure": true,
+      "tint": ""
+    }
+  },
+  "fx_assets": {
+    "boom": "puff",
+    "meteor": "botol",
+    "fire": "api",
+    "cloud": "gas",
+    "push": "semprot"
+  },
+  "actions": {
+    "orasi": {
+      "type": "chant",
+      "texts": [
+        "TURUNKAN HARGA!",
+        "BERAS MURAH!",
+        "WIFI GRATIS!",
+        "JANGAN MAGER!",
+        "KERJA LAYAK!",
+        "DENGARKAN KAMI!",
+        "HIDUP RAKYAT!"
+      ],
+      "count": 6,
+      "secs": 3.2,
+      "anim": "cheer",
+      "boost_secs": 12
+    },
+    "nasi_bungkus": {
+      "type": "heal",
+      "amount": 260,
+      "asset": "nasi"
+    },
+    "molotov": {
+      "type": "meteor",
+      "count": 1,
+      "asset": "botol",
+      "radius": 2.4,
+      "damage": 60,
+      "castle_damage": 70,
+      "target": "front",
+      "burn_secs": 6,
+      "burn_dps": 8,
+      "burn_asset": "api"
+    },
+    "barikade": {
+      "type": "spawn",
+      "unit": "barikade",
+      "count": 3,
+      "at": "front"
+    },
+    "tambah_warga": {
+      "type": "spawn",
+      "unit": "warga",
+      "count": 4
+    },
+    "tambah_mahasiswa": {
+      "type": "spawn",
+      "unit": "mahasiswa",
+      "count": 4
+    },
+    "tambah_aparat": {
+      "type": "spawn",
+      "unit": "polisi",
+      "count": 4
+    },
+    "bantuan_asing": {
+      "type": "heal",
+      "amount": 300,
+      "asset": "uang"
+    },
+    "water_cannon": {
+      "type": "push",
+      "strength": 8.5,
+      "radius": 5.5,
+      "target": "front"
+    },
+    "gas_air_mata": {
+      "type": "cloud",
+      "radius": 4.0,
+      "secs": 9,
+      "slow": 0.45,
+      "dps": 5,
+      "target": "front",
+      "asset": "gas"
+    },
+    "intelijen": {
+      "type": "sabotage",
+      "slow_secs": 8,
+      "slow": 0.6,
+      "structures": true
+    },
+    "sogokan": {
+      "type": "convert",
+      "count": 3,
+      "radius": 7.5,
+      "target": "front"
+    },
+    "massa": {
+      "type": "spawn",
+      "unit": "warga",
+      "count": 10,
+      "at": "front"
+    }
+  },
+  "gift_aliases": {
+    "mawar": "rose",
+    "donat": "doughnut",
+    "jari hati": "fingerheart",
+    "parfum": "perfume",
+    "singa": "lion",
+    "galaksi": "galaxy",
+    "paus": "whale",
+    "semesta": "universe",
+    "money gun": "moneygun",
+    "uang": "moneygun"
+  },
+  "triggers": [
+    {
+      "name": "rose",
+      "on": "gift:rose",
+      "side": "A",
+      "macro": "orasi_besar",
+      "label": "ROSE = ORASI (MORAL NAIK)",
+      "icon": ":party:",
+      "cooldown": 4
+    },
+    {
+      "name": "tiktok",
+      "on": "gift:tiktok",
+      "side": "B",
+      "do": "molotov",
+      "label": "TIKTOK = MOLOTOV KE PEMERINTAH",
+      "icon": ":fire:",
+      "per_count": true,
+      "max_repeat": 3,
+      "overlay": [
+        {
+          "type": "emoji",
+          "emoji": "🔥",
+          "size": 0.16,
+          "at": [
+            0.5,
+            0.5
+          ],
+          "ttl": 1.2000000476837158,
+          "anim_in": "pop",
+          "anim_out": "fade",
+          "z": 5
+        },
+        {
+          "type": "text",
+          "text": "{user}",
+          "size": 0.04,
+          "at": [
+            0.5,
+            0.62
+          ],
+          "color": "#ffffff",
+          "ttl": 1.8,
+          "anim_in": "slide_up",
+          "z": 5,
+          "outline": "#000000"
+        }
+      ]
+    },
+    {
+      "name": "fingerheart",
+      "on": "gift:fingerheart",
+      "side": "A",
+      "do": "nasi_bungkus",
+      "label": "FINGER HEART = NASI BUNGKUS (PULIH)",
+      "icon": ":heart:",
+      "overlay": [
+        {
+          "type": "emoji",
+          "emoji": "🍙",
+          "size": 0.16,
+          "at": [
+            0.5,
+            0.5
+          ],
+          "ttl": 1.399999976158142,
+          "anim_in": "pop",
+          "anim_out": "fade",
+          "z": 5
+        }
+      ]
+    },
+    {
+      "name": "handhearts",
+      "on": "gift:handhearts",
+      "side": "A",
+      "do": "barikade",
+      "label": "HAND HEARTS = BARIKADE",
+      "icon": ":brick:"
+    },
+    {
+      "name": "doughnut",
+      "on": "gift:doughnut",
+      "side": "A",
+      "do": "tambah_warga",
+      "per_count": true,
+      "label": "DOUGHNUT = +4 WARGA",
+      "icon": ":blue_square:"
+    },
+    {
+      "name": "perfume",
+      "on": "gift:perfume",
+      "side": "B",
+      "macro": "bantuan_asing",
+      "label": "PERFUME = BANTUAN ASING / KORUPSI",
+      "icon": ":money:",
+      "cooldown": 5
+    },
+    {
+      "name": "galaxy",
+      "on": "gift:galaxy",
+      "side": "A",
+      "macro": "penertiban",
+      "label": "GALAXY = ULTIMATE PENERTIBAN (FPV APARAT)",
+      "icon": ":wave:",
+      "cooldown": 12
+    },
+    {
+      "name": "whale",
+      "on": "gift:whale",
+      "side": "B",
+      "macro": "aksi_massa",
+      "label": "PAUS = ULTIMATE AKSI SERIBU MASSA (FPV RAKYAT)",
+      "icon": ":crown:",
+      "cooldown": 15
+    },
+    {
+      "name": "lion",
+      "on": "gift:lion",
+      "side": "A",
+      "do": "intelijen",
+      "label": "LION = INTELIJEN MENYUSUP",
+      "icon": ":warning:",
+      "cooldown": 6,
+      "overlay": [
+        {
+          "type": "emoji",
+          "emoji": "🕵️",
+          "size": 0.16,
+          "at": [
+            0.5,
+            0.5
+          ],
+          "ttl": 1.399999976158142,
+          "anim_in": "pop",
+          "anim_out": "fade",
+          "z": 5
+        }
+      ]
+    },
+    {
+      "name": "universe",
+      "on": "gift:universe",
+      "side": "A",
+      "do": "sogokan",
+      "label": "UNIVERSE = NASI BUNGKUS SOGOKAN",
+      "icon": ":gift:",
+      "cooldown": 8
+    },
+    {
+      "name": "moneygun",
+      "on": "gift:moneygun",
+      "side": "B",
+      "do": "tambah_aparat",
+      "per_count": true,
+      "label": "MONEY GUN = +4 APARAT",
+      "icon": ":shield:"
+    },
+    {
+      "name": "join_rakyat",
+      "on": [
+        "comment:~rakyat",
+        "comment:~demo"
+      ],
+      "side": "A",
+      "do": {
+        "type": "spawn",
+        "unit": "mahasiswa",
+        "count": 1
+      },
+      "cooldown": 1.5,
+      "legend": false,
+      "announce": "{user} IKUT DEMO"
+    },
+    {
+      "name": "join_aparat",
+      "on": "comment:~aparat",
+      "side": "B",
+      "do": {
+        "type": "spawn",
+        "count": 1
+      },
+      "cooldown": 1.5,
+      "legend": false,
+      "announce": "{user} JAGA GEDUNG"
+    },
+    {
+      "name": "likes",
+      "on": "like",
+      "side": "event",
+      "do": {
+        "type": "spawn",
+        "count": 1
+      },
+      "min_count": 10,
+      "cooldown": 3,
+      "legend": false,
+      "announce": "{user} LIKE x{count}"
+    }
+  ],
+  "macros": {
+    "orasi_besar": [
+      {
+        "do": "announce",
+        "text": "{user} BERORASI DI ATAS PANGGUNG!",
+        "secs": 2.4,
+        "color": "#f2a31b"
+      },
+      {
+        "do": "act",
+        "action": "orasi",
+        "side": "A"
+      }
+    ],
+    "bantuan_asing": [
+      {
+        "do": "random",
+        "choices": [
+          {
+            "weight": 7,
+            "steps": [
+              {
+                "do": "announce",
+                "text": "BANTUAN ASING MASUK KE KAS NEGARA",
+                "secs": 2.4,
+                "color": "#3f74c4"
+              },
+              {
+                "do": "act",
+                "action": "bantuan_asing",
+                "side": "B"
+              }
+            ]
+          },
+          {
+            "weight": 3,
+            "steps": [
+              {
+                "do": "announce",
+                "text": "DANA DIKORUPSI! RAKYAT MAKIN MARAH",
+                "secs": 2.6,
+                "color": "#ff6a4a"
+              },
+              {
+                "do": "act",
+                "action": {
+                  "type": "heal",
+                  "amount": 150,
+                  "asset": "uang"
+                },
+                "side": "B"
+              },
+              {
+                "do": "act",
+                "action": "orasi",
+                "side": "A"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "penertiban": [
+      {
+        "do": "announce",
+        "text": "PENERTIBAN! WATER CANNON DAN GAS AIR MATA",
+        "secs": 2.6,
+        "color": "#3f74c4"
+      },
+      {
+        "do": "act",
+        "action": {
+          "type": "cinematic",
+          "pov": "enemy",
+          "secs": 8,
+          "look": "enemy",
+          "fov": 76,
+          "shake": 0.22,
+          "tint": "#2f5fa845",
+          "vignette": 0.55,
+          "bob": 1.2
+        },
+        "side": "event"
+      },
+      {
+        "do": "wait",
+        "secs": 1.4
+      },
+      {
+        "do": "act",
+        "action": "water_cannon",
+        "side": "A"
+      },
+      {
+        "do": "wait",
+        "secs": 0.9
+      },
+      {
+        "do": "act",
+        "action": "gas_air_mata",
+        "side": "A"
+      }
+    ],
+    "aksi_massa": [
+      {
+        "do": "announce",
+        "text": "{user} MENGGERAKKAN AKSI SERIBU MASSA!",
+        "secs": 2.8,
+        "color": "#f2a31b"
+      },
+      {
+        "do": "act",
+        "action": {
+          "type": "cinematic",
+          "pov": "enemy",
+          "secs": 8,
+          "look": "enemy",
+          "fov": 80,
+          "shake": 0.14,
+          "tint": "#f2a31b30",
+          "vignette": 0.45,
+          "bob": 1.6
+        },
+        "side": "event"
+      },
+      {
+        "do": "wait",
+        "secs": 1.2
+      },
+      {
+        "do": "act",
+        "action": "massa",
+        "side": "A"
+      },
+      {
+        "do": "act",
+        "action": "orasi",
+        "side": "A"
+      }
+    ],
+    "solidaritas": [
+      {
+        "do": "if",
+        "cond": {
+          "hp_pct_lt": {
+            "side": "A",
+            "value": 25
+          }
+        },
+        "then": [
+          {
+            "do": "announce",
+            "text": "SOLIDARITAS! WARGA DATANG MEMBANTU",
+            "secs": 2.2,
+            "color": "#f2a31b"
+          },
+          {
+            "do": "act",
+            "action": "tambah_warga",
+            "side": "A"
+          },
+          {
+            "do": "act",
+            "action": "orasi",
+            "side": "A"
+          }
+        ]
+      },
+      {
+        "do": "if",
+        "cond": {
+          "hp_pct_lt": {
+            "side": "B",
+            "value": 25
+          }
+        },
+        "then": [
+          {
+            "do": "announce",
+            "text": "DANA DARURAT CAIR",
+            "secs": 2.2,
+            "color": "#3f74c4"
+          },
+          {
+            "do": "act",
+            "action": "bantuan_asing",
+            "side": "B"
+          },
+          {
+            "do": "act",
+            "action": "tambah_aparat",
+            "side": "B"
+          }
+        ]
+      }
+    ]
+  },
+  "bots": [
+    {
+      "name": "solidaritas_watch",
+      "macro": "solidaritas",
+      "every": 15
+    }
+  ],
+  "autopilot": {
+    "idle_secs": 6,
+    "interval": [
+      2.5,
+      6.0
+    ],
+    "actions": [
+      {
+        "weight": 3,
+        "do": "tambah_warga",
+        "side": "A"
+      },
+      {
+        "weight": 3,
+        "do": "tambah_aparat",
+        "side": "B"
+      },
+      {
+        "weight": 2,
+        "do": "tambah_mahasiswa",
+        "side": "A"
+      },
+      {
+        "weight": 2,
+        "do": "orasi",
+        "side": "A"
+      },
+      {
+        "weight": 1,
+        "do": "nasi_bungkus",
+        "side": "A"
+      },
+      {
+        "weight": 1,
+        "do": "bantuan_asing",
+        "side": "B"
+      },
+      {
+        "weight": 1,
+        "do": "molotov",
+        "side": "B"
+      },
+      {
+        "weight": 1,
+        "do": "water_cannon",
+        "side": "A"
+      },
+      {
+        "weight": 1,
+        "do": "gas_air_mata",
+        "side": "A"
+      },
+      {
+        "weight": 1,
+        "do": "barikade",
+        "side": "A"
+      },
+      {
+        "weight": 1,
+        "do": "sogokan",
+        "side": "A"
+      }
+    ]
+  },
+  "biome": "siang",
+  "biome_rotation": {
+    "every": "round",
+    "list": [
+      "siang",
+      "malam"
+    ]
+  },
+  "biomes": {
+    "siang": {
+      "name": "SIANG",
+      "sky": "day",
+      "speed": 1.0,
+      "terrain": {
+        "p": {
+          "top": "#cfc7b8:stone",
+          "side": "#9a9285:stone"
+        },
+        "a": {
+          "top": "#4a4d55:stone",
+          "side": "#2f3138:stone"
+        },
+        "m": {
+          "top": "#e8e8e8:stone",
+          "side": "#2f3138:stone"
+        },
+        "q": {
+          "top": "#b9b9c4:stone",
+          "side": "#8c8c98:stone"
+        },
+        "f": {
+          "top": "#5fae52:grass",
+          "side": "#8c8c98:stone"
+        },
+        "k": {
+          "top": "#b9b2a5:stone",
+          "side": "#8a8478:stone"
+        }
+      }
+    },
+    "sore": {
+      "name": "SORE",
+      "sky": "sunset",
+      "speed": 1.0,
+      "terrain": {
+        "p": {
+          "top": "#d8b896:stone",
+          "side": "#a08468:stone"
+        },
+        "a": {
+          "top": "#53474c:stone",
+          "side": "#352c30:stone"
+        },
+        "m": {
+          "top": "#f0d8c0:stone",
+          "side": "#352c30:stone"
+        },
+        "q": {
+          "top": "#c4aaa8:stone",
+          "side": "#947c7c:stone"
+        },
+        "f": {
+          "top": "#6f9a4a:grass",
+          "side": "#947c7c:stone"
+        },
+        "k": {
+          "top": "#c4a890:stone",
+          "side": "#907c68:stone"
+        }
+      }
+    },
+    "malam": {
+      "name": "MALAM",
+      "sky": "night",
+      "speed": 0.95,
+      "terrain": {
+        "p": {
+          "top": "#8e8aa6:stone",
+          "side": "#625f7a:stone"
+        },
+        "a": {
+          "top": "#2c2e3a:stone",
+          "side": "#1c1d26:stone"
+        },
+        "m": {
+          "top": "#b8b8cc:stone",
+          "side": "#1c1d26:stone"
+        },
+        "q": {
+          "top": "#7a7a96:stone",
+          "side": "#565670:stone"
+        },
+        "f": {
+          "top": "#2f5a3a:grass",
+          "side": "#565670:stone"
+        },
+        "k": {
+          "top": "#6e6a80:stone",
+          "side": "#524f64:stone"
+        }
+      }
+    }
+  },
+  "overlay": []
+}

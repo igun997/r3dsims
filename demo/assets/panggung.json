@@ -1,0 +1,39 @@
+{
+  "name": "panggung",
+  "voxel": 0.20000000298023224,
+  "palette": {
+    "deck": "#8a6a4a:wood",
+    "deck2": "#6b4f35:wood",
+    "flag": "#f2a31b:fabric",
+    "lamp": "#fff0b0*",
+    "pole": "#3c3c44:metal",
+    "roof": "#f2a31b:tile",
+    "speaker": "#1a1a20",
+    "trim": "#ffffff"
+  },
+  "parts": [
+    {
+      "name": "body",
+      "pivot": [0.0,0.0,0.0],
+      "shape": [
+        {"op":"box","at":[-12,0,-10],"size":[24,3,20],"c":"deck"},
+        {"op":"box","at":[-4,0,10],"size":[8,2,2],"c":"deck2"},
+        {"op":"box","at":[-4,2,10],"size":[8,1,1],"c":"deck2"},
+        {"op":"box","at":[-12,3,-10],"size":[2,16,2],"c":"pole"},
+        {"op":"box","at":[10,3,-10],"size":[2,16,2],"c":"pole"},
+        {"op":"box","at":[-10,10,-10],"size":[20,8,1],"c":"flag"},
+        {"op":"box","at":[-10,10,-10],"size":[20,1,1],"c":"trim"},
+        {"op":"box","at":[-10,17,-10],"size":[20,1,1],"c":"trim"},
+        {"op":"box","at":[-6,12,-10],"size":[12,2,1],"c":"trim"},
+        {"op":"box","at":[-12,19,-10],"size":[24,1,9],"c":"roof"},
+        {"op":"box","at":[-11,3,-3],"size":[3,6,3],"c":"speaker"},
+        {"op":"box","at":[8,3,-3],"size":[3,6,3],"c":"speaker"},
+        {"op":"box","at":[-2,3,-2],"size":[4,5,3],"c":"deck2"},
+        {"op":"box","at":[0,3,2],"size":[1,7,1],"c":"pole"},
+        {"op":"box","at":[0,10,2],"size":[1,1,2],"c":"pole"},
+        {"op":"box","at":[-6,18,-8],"size":[2,1,2],"c":"lamp"},
+        {"op":"box","at":[4,18,-8],"size":[2,1,2],"c":"lamp"}
+      ]
+    }
+  ]
+}

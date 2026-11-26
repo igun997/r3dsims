@@ -134,6 +134,9 @@ fn only_ultimates_move_the_camera() {
     assert_eq!(war.state_json()["cinematic"], json!(true));
     assert!(!world.rig.cam.ortho, "first person is a perspective camera");
     assert!(world.rig.cam.dist < 10.0 && world.rig.cam.fov > 60.0);
+    // the viewpoint is the camp of the attacker (RAKYAT: the stage, x about 8.5), raised above its gate, not a soldier
+    let eye = world.rig.cam.eye();
+    assert!(eye.x > 9.0 && eye.x < 15.0 && eye.y > 3.5, "eye at the citizens' camp gate: {eye:?}");
     assert!(war.state_json()["overlay_elements"].as_array().unwrap().iter().any(|e| e == "cine.tint"), "the ultimate tints the screen");
     sim(&mut war, &mut world, 8.5);
     assert_eq!(war.state_json()["cinematic"], json!(false));
