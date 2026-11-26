@@ -105,6 +105,8 @@ Clay look by default (`--style clay`: smooth hand-made figures; `--style voxel` 
 (ordinary skills never move the camera), biomes, and an autopilot that keeps an empty stream alive. Reference:
 [`docs/LIVE.md`](docs/LIVE.md); skill: `r3dsims-live`.
 
+**Not only a game.** The same server runs a **studio** (`r3dsims template studio -o studio`): no sides, rounds or winner, only your scene with viewers talking to it. The kampung template turns chat into speech bubbles of the villagers, gifts into effects (a rose is a dance, a galaxy turns night and orbits the camera), likes into a goal bar, and a bot greets when nobody writes. Triggers, macros and bots are the same data as a war's, so any diorama can be a show. See "Shows" in [`docs/LIVE.md`](docs/LIVE.md).
+
 `demo` (citizens vs government), day and night, and the two ultimates seen from the point of view of each camp:
 
 <p align="center">

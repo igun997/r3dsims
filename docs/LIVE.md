@@ -1,9 +1,12 @@
-# Live streaming: war, or a street demonstration, driven by webhooks
+# Live streaming: any show (a game or not) driven by webhooks
 
-`r3dsims live` runs a diorama in real time and does two things only:
+`r3dsims live` runs a diorama in real time. What the diorama does with a viewer event is a **show**: a game (`war.json`:
+two camps, rounds, a winner) or a **studio** (`studio.json`: no game at all, a village where chat becomes speech bubbles,
+a harbour where gifts raise fireworks, your own scene with your own rules). The server around the show (picture, overlay,
+TikTok, RTMP, dashboard, webhooks) does not know which one it runs, and does two things only:
 
-1. **takes webhooks** (a viewer sent a gift, liked, commented) and turns them into effects that already
-   exist in the diorama (meteors, lightning, arrow rain, reinforcements, shields, ...);
+1. **takes webhooks** (a viewer sent a gift, liked, commented) and hands them to the show, which turns them into effects
+   that exist in the diorama (a war: meteors, lightning, reinforcements; a studio: whatever its macros say);
 2. **delivers the picture** (MJPEG over HTTP, and/or ffmpeg to `rtmp://`, `srt://`, a file, stdout).
 
 The platform connector (TikTok, YouTube, ...) is **another application**. It only has to `POST` JSON to
@@ -189,6 +192,54 @@ lost (the other side's wins); draws are counted apart; the session goes to the s
 `r3dsims history` prints the table, `GET /history` returns `{sessions, totals}` (totals per side name across all sessions:
 rounds won/lost, sessions won/lost). `GET /state` has `session` for the running one. The HUD shows `MENANG` and `KALAH` per
 side (labels `label_wins` / `label_losses` in `texts`).
+
+## Shows: a war, or a studio (not a game)
+
+`r3dsims live FILE` reads `FILE` and decides by what is in it: with `sides` it is a war, without it is a studio.
+Both name a `scene` and both are made of the same parts: **triggers** (what a viewer event matches), **macros** (what runs:
+`wait`, `repeat`, `random`, `if`, `overlay`, `step` for any story or camera command, `set`, `add`, `call`, `announce`),
+**bots** (what runs when nobody writes) and an **overlay**. What a war adds is `sides`, units, actions, rounds and the history of
+wins and losses; a studio adds nothing, so nothing in the way.
+
+```
+r3dsims template studio -o studio      # the kampung diorama as a live show
+r3dsims validate studio/studio.json    # checks macros, steps and actors, fires every trigger, idles 45 s
+r3dsims live studio/studio.json --preset live     # then http://127.0.0.1:8787/dashboard
+r3dsims send comment "halo kampung" --user Sari
+r3dsims send gift rose --user Budi
+r3dsims send like 20
+```
+
+```json
+{
+  "title": "KAMPUNG LIVE",
+  "scene": "scene.json",
+  "vars": {"likes": 0},
+  "goal": {"var": "likes", "target": 200, "label": "TARGET LIKE", "on_reach": "target_tercapai"},
+  "triggers": [
+    {"on": "comment", "macro": "balon", "cooldown": 1.2},
+    {"on": "like", "macro": "hitung_like"},
+    {"on": "gift:rose", "macro": "tari_mawar", "label": "ROSE = TARI MAWAR", "icon": ":rose:", "stop": true}
+  ],
+  "macros": {
+    "balon": [{"do": "step", "step": {"do": "say", "actor": "ani", "text": "{user}: {text}", "secs": 4}}],
+    "hitung_like": [{"do": "add", "var": "likes", "from": "count"}]
+  },
+  "bots": [{"name": "sapa", "macro": "balon", "when_idle": 15}]
+}
+```
+
+* In macro text, overlay elements and `step`s, `{user} {text} {gift} {count} {diamonds}` name the viewer event that started
+  it and `{var.NAME}` a counter. Chat text is cut at 70 characters.
+* `add` takes `"from": "count"` (a like of count 20 adds 20) or `"diamonds"`; `set`/`add` change a counter, `goal` shows one
+  as a bar. A repeating goal asks for another `target` each time it is reached.
+* A studio refuses at load what needs a game: trigger `do`, the `act` step, conditions about sides or rounds. An unknown
+  macro, a `step` that is not a story or camera command, or an `actor` that is not in the scene is an error that names it.
+* The on-screen part: title, goal bar, the leaderboard (top 3 by points; a gift counts its diamonds), the ticker, the
+  banner and the gift menu (triggers with a `label`). `"hud": false` turns it off.
+* Control: `pause`, `resume`, `reset`, `run:MACRO`. `GET /state` has `kind: "studio"`, `vars`, `goal`; there is no
+  win/loss history without camps. The dashboard hides what only a game has.
+* `r3dsims hook publish` works the same way (triggers, macros, bots, gift aliases); a studio refuses `actions` and `units`.
 
 ## war.json
 

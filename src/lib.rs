@@ -34,6 +34,8 @@ pub mod record;
 pub mod story;
 pub mod templates;
 pub mod live;
+pub mod show;
+pub mod studio;
 pub mod output;
 pub mod tiktok;
 pub mod overlay;

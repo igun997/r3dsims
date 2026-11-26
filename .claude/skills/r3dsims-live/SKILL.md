@@ -1,11 +1,11 @@
 ---
 name: r3dsims-live
-description: Use to run or operate an r3dsims live stream (a war between two kingdoms, or the citizens-vs-government demonstration parody) driven by TikTok LIVE or webhooks: the built-in TikTok connector, the dashboard, going live over RTMP from Linux, gifts, likes and comments become effects, ultimates get a camp point-of-view camera with their own effects, biomes change the world, an autopilot keeps an empty stream alive. Publish triggers/macros/bots, add overlay text/emoji/SVG, control rounds, read state and wins/losses.
+description: Use to run or operate an r3dsims live stream, a game (war between two kingdoms, citizens-vs-government parody) or NOT a game (a studio: any scene where chat becomes speech bubbles, gifts become effects, likes fill a goal), driven by TikTok LIVE or webhooks: the built-in TikTok connector, the dashboard, going live over RTMP from Linux, gifts, likes and comments become effects, ultimates get a camp point-of-view camera, biomes, an autopilot for an empty stream. Publish triggers/macros/bots, add overlay text/emoji/SVG, control the show, read state and wins/losses.
 ---
 
 # r3dsims live
 
-`r3dsims live war.json` runs a diorama in real time. Another app (the platform connector) `POST`s viewer events to
+`r3dsims live FILE` runs a diorama in real time; FILE is a **show**: `war.json` (a game, has `sides`) or `studio.json` (no game: triggers, macros, bots and a goal over any scene). Another app (the platform connector) `POST`s viewer events to
 `/webhook` and takes the picture from `/stream.mjpg` or `--out rtmp://...`. You author and change everything with the
 CLI while it runs. Full reference: `docs/LIVE.md` in the repo; read it before writing triggers or overlays.
 
@@ -69,6 +69,11 @@ JSON
   moves when nobody sent an event for 6 s; a real event hands control back. `"autopilot": null` turns it off.
 * A bad publication changes nothing and lists every problem (unknown action, macro, unit, biome, side). Fix, resend.
 * `label` + `icon` make the entry appear in the on-screen gift menu, so viewers know what each gift does.
+
+## A show that is not a game (studio)
+
+`r3dsims template studio -o studio` (the kampung village), `r3dsims validate studio/studio.json`, `r3dsims live studio/studio.json --preset live`.
+`studio.json` = `{title, scene, vars, goal{var,target,label,on_reach,repeat}, triggers, macros, bots, gift_aliases, overlay, play, hud}`. Same triggers/macros/bots as a war, minus what needs a game: no `sides`, `units`, `actions`, trigger `do`, `act` step, or side/round conditions (refused at load, named). A macro `step` is any story or camera step (`say`, `play`, `set_sky`, `{"op":"orbit",...}`); `{user} {text} {gift} {count} {diamonds}` name the viewer event, `{var.NAME}` a counter; `{"do":"add","var":"likes","from":"count"}` adds a like event's count. Control: `pause`, `resume`, `reset`, `run:MACRO`. `state` has `kind: "studio"`, `vars`, `goal`, no win/loss history. Studio beats war when the user wants a chat-driven village, harbour, room, product showcase: copy the template, change `scene`, actors in macros, triggers.
 
 ## Make a new world (any theme)
 

@@ -51,6 +51,7 @@
   #log { height:120px; overflow:auto; font:12px/1.35 ui-monospace,monospace; color:var(--mute); }
   #log .bad { color:var(--bad); } #log .ok { color:var(--ok); }
   .peer a { color:#8cb8ff; }
+  #app.studio .game { display:none !important; }
   @media (max-width:800px) { #app { flex-direction:column; } #side { width:auto; max-width:none; height:60%; border-left:0; border-top:1px solid var(--line); } }
 </style>
 <div id="app">
@@ -100,21 +101,21 @@
         <div class="hint" id="outHelp" style="margin-top:6px"></div>
       </div>
 
-      <h2>Skor</h2>
+      <h2 id="hScore">Skor</h2>
       <div class="card" id="score"></div>
 
-      <h2>Match</h2>
+      <h2 id="hMatch">Match</h2>
       <div class="card row">
         <button class="go" data-ctl="start">start</button>
         <button data-ctl="pause">pause</button>
         <button data-ctl="resume">resume</button>
-        <button data-ctl="next_round">ronde berikut</button>
+        <button data-ctl="next_round" class="game">ronde berikut</button>
         <button class="stop" data-ctl="reset">reset</button>
-        <button class="stop" data-ctl="stop">stop</button>
+        <button class="stop game" data-ctl="stop">stop</button>
       </div>
 
-      <h2>Riwayat sesi (menang / kalah)</h2>
-      <div class="card" id="history">memuat...</div>
+      <h2 class="game">Riwayat sesi (menang / kalah)</h2>
+      <div class="card game" id="history">memuat...</div>
     </div>
 
     <!-- ============================================================ UJI COBA -->
@@ -123,7 +124,7 @@
       <div class="card row">
         <label>nama <input id="user" type="text" value="Tester" style="width:110px"></label>
         <label>jumlah <input id="count" type="number" min="1" value="1"></label>
-        <label>kubu <select id="sideSel"><option value="">otomatis</option></select></label>
+        <label class="game">kubu <select id="sideSel"><option value="">otomatis</option></select></label>
       </div>
 
       <h2>Gift</h2>
@@ -143,13 +144,13 @@
       <h2>Jalankan langsung (aksi / makro)</h2>
       <div class="card row">
         <select id="runName" class="grow"></select>
-        <select id="runSide" style="min-width:110px"></select>
+        <select id="runSide" class="game" style="min-width:110px"></select>
         <button id="run">jalankan</button>
       </div>
       <div class="hint">Perlu ronde yang sedang berjalan.</div>
 
-      <h2>Biome</h2>
-      <div class="card row" id="biomes"></div>
+      <h2 class="game">Biome</h2>
+      <div class="card row game" id="biomes"></div>
 
       <h2>Simulasi penonton</h2>
       <div class="card row">
@@ -380,13 +381,14 @@ function renderState(st) {
   fillSides(keys, Object.fromEntries(keys.map((k) => [k, st.sides[k].name])));
   const chips = $('chips');
   clear(chips);
-  chips.append(
-    chip('fase', st.phase + (st.paused ? ' (pause)' : '')),
-    chip('ronde', st.round + '/' + (st.mode === 'endless' ? '∞' : st.rounds)),
-    chip('sisa', (st.round_secs_left || 0) + 's'),
-    chip('biome', st.biome || '-'),
-    chip('fps', st.perf && st.perf.fps ? Math.round(st.perf.fps) : '-'),
-  );
+  const studio = st.kind === 'studio';
+  $('app').classList.toggle('studio', studio);
+  $('hScore').textContent = studio ? 'Target & penonton' : 'Skor';
+  $('hMatch').textContent = studio ? 'Kontrol' : 'Match';
+  chips.append(chip('fase', st.phase + (st.paused ? ' (pause)' : '')));
+  if (!studio) chips.append(chip('ronde', st.round + '/' + (st.mode === 'endless' ? '∞' : st.rounds)), chip('sisa', (st.round_secs_left || 0) + 's'), chip('biome', st.biome || '-'));
+  chips.append(chip('fps', st.perf && st.perf.fps ? Math.round(st.perf.fps) : '-'));
+  if (studio) chips.append(chip('event', st.events_seen || 0));
   if (st.cinematic) chips.append(chip('kamera', 'ultimate'));
   if (st.autopilot) chips.append(chip('mode', 'autopilot'));
   renderTikTok(st.tiktok);
@@ -394,6 +396,25 @@ function renderState(st) {
 
   const score = $('score');
   clear(score);
+  if (studio) {
+    const g = st.goal;
+    if (g) {
+      const wrap = el('div');
+      const nm = el('div', null, 'name');
+      nm.append(el('b', g.label), el('span', g.value + ' / ' + g.target + (g.reached ? ' · tercapai ' + g.reached + 'x' : '')));
+      const bar = el('div', null, 'bar');
+      const fill = el('i');
+      fill.style.width = Math.max(0, Math.min(100, (100 * g.value) / (g.target || 1))) + '%';
+      fill.style.background = 'var(--a)';
+      bar.appendChild(fill);
+      wrap.append(nm, bar);
+      score.appendChild(wrap);
+    }
+    const vs = Object.entries(st.vars || {});
+    if (vs.length) score.appendChild(el('div', vs.map(([k, v]) => k + ' ' + v).join(' · '), 'hint'));
+    if ((st.top || []).length) score.appendChild(el('div', 'teratas: ' + st.top.map((t) => t.user + ' ' + t.points).join(' · '), 'hint'));
+    return;
+  }
   keys.forEach((k, i) => {
     const s = st.sides[k];
     const sess = (st.session && st.session.sides && st.session.sides[k]) || { wins: 0, losses: 0 };
@@ -543,7 +564,7 @@ function renderPeers() {
     else {
       const st = d.st;
       const keys = Object.keys(st.sides || {});
-      card.appendChild(el('div', (st.title || '') + ' · ' + st.phase + ' · ronde ' + st.round + ' · ' + (st.biome || '-') + ' · ' + ((st.perf && st.perf.fps) || '-') + ' fps', 'hint'));
+      card.appendChild(el('div', (st.title || '') + ' · ' + st.phase + (st.kind === 'studio' ? ' · studio · event ' + (st.events_seen || 0) : ' · ronde ' + st.round + ' · ' + (st.biome || '-')) + ' · ' + ((st.perf && st.perf.fps) || '-') + ' fps', 'hint'));
       for (const k of keys) {
         const s = st.sides[k];
         const sess = (st.session && st.session.sides && st.session.sides[k]) || { wins: 0, losses: 0 };

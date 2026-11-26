@@ -185,7 +185,7 @@ fn http(addr: &str, tok: Option<&str>) -> Client {
 
 fn opts(dir: &std::path::Path, listen: &str, token: Option<&str>) -> LiveOpts {
     LiveOpts {
-        war: dir.join("war.json"),
+        show: dir.join("war.json"),
         listen: listen.into(),
         token: token.map(str::to_string),
         out_w: 480,

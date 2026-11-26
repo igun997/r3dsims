@@ -12,10 +12,10 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::overlay::{Element, Overlay, Vars, interpolate};
-use crate::script::{Cond, Ctx, MStep, Runner};
+use crate::script::{Cond, Ctx, Host, MStep, Runner};
 use crate::world::{EntityDef, TilePatch, World};
 use crate::camera::{CamParams, Camera, CameraCmd};
 
@@ -800,11 +800,11 @@ impl Event {
     }
 }
 
-fn norm(s: &str) -> String {
+pub(crate) fn norm(s: &str) -> String {
     s.to_lowercase().chars().filter(|c| !matches!(c, ' ' | '_' | '-')).collect()
 }
 
-fn pattern_matches(pat: &str, ev: &Event, gift_norm: &str) -> bool {
+pub(crate) fn pattern_matches(pat: &str, ev: &Event, gift_norm: &str) -> bool {
     let (kind, arg) = match pat.split_once(':') {
         Some((k, a)) => (k, Some(a)),
         None => (pat, None),
@@ -2122,17 +2122,8 @@ impl War {
     }
 
     fn add_overlay_templated(&mut self, e: &Element, vars: &Vars) {
-        match serde_json::to_value(e) {
-            Ok(mut v) => {
-                interp_value(&mut v, vars);
-                match serde_json::from_value::<Element>(v) {
-                    Ok(el) => {
-                        self.overlay.add(el);
-                    }
-                    Err(err) => self.warn(format!("overlay element: {err}")),
-                }
-            }
-            Err(err) => self.warn(format!("overlay element: {err}")),
+        if let Err(err) = self.overlay.add_templated(e, vars) {
+            self.warn(format!("overlay element: {err}"));
         }
     }
 
@@ -3325,46 +3316,7 @@ impl War {
     /// `{"add": [...], "remove": ["id"], "patch": {"id": {...}}, "clear": true}`; a bare element or array adds.
     pub fn overlay_op(&mut self, body: &Value) -> Result<Value> {
         let vars = self.vars();
-        let mut added = vec![];
-        let mut removed = vec![];
-        let obj = body.as_object();
-        let is_op = obj.is_some_and(|o| o.contains_key("add") || o.contains_key("remove") || o.contains_key("patch") || o.contains_key("clear"));
-        if !is_op {
-            for e in crate::overlay::parse_elements(&body.to_string())? {
-                added.push(self.overlay.add(e));
-            }
-            return Ok(json!({"added": added}));
-        }
-        let o = obj.cloned().unwrap_or_else(Map::new);
-        if o.get("clear").and_then(Value::as_bool).unwrap_or(false) {
-            self.overlay.clear();
-        }
-        if let Some(r) = o.get("remove") {
-            let ids: Vec<String> = match r {
-                Value::String(s) => vec![s.clone()],
-                Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
-                _ => bail!("remove must be an id or an array of ids"),
-            };
-            for id in ids {
-                if self.overlay.remove(&id) {
-                    removed.push(id);
-                }
-            }
-        }
-        if let Some(Value::Object(p)) = o.get("patch") {
-            for (id, patch) in p {
-                self.overlay.patch(id, patch)?;
-            }
-        }
-        if let Some(a) = o.get("add") {
-            let mut a = a.clone();
-            interp_value(&mut a, &vars);
-            let wrapped = if a.is_array() { a } else { Value::Array(vec![a]) };
-            for e in crate::overlay::parse_elements(&wrapped.to_string())? {
-                added.push(self.overlay.add(e));
-            }
-        }
-        Ok(json!({"added": added, "removed": removed, "elements": self.overlay.len()}))
+        self.overlay.apply_op(body, &vars)
     }
 }
 
@@ -3391,24 +3343,51 @@ pub struct Hooks {
     pub replace: bool,
 }
 
+/// The war as the host of macros: it knows sides, so `act` and `announce` land on one.
+impl Host for War {
+    fn eval(&mut self, c: &Cond, ctx: &Ctx) -> bool {
+        War::eval(self, c, ctx)
+    }
+    fn rand(&mut self) -> f32 {
+        War::rand(self)
+    }
+    fn act(&mut self, world: &mut World, action: &ActionRef, side: Option<&str>, ctx: &Ctx) {
+        let s = self.resolve_side(side.unwrap_or("event"), ctx);
+        self.exec(world, action, s, ctx);
+    }
+    fn inject(&mut self, world: &mut World, ev: Event) {
+        War::inject(self, world, ev)
+    }
+    fn announce(&mut self, world: &mut World, text: String, secs: f32, color: Option<String>, ctx: &Ctx) {
+        let s = self.resolve_side("event", ctx);
+        self.exec(world, &ActionRef::Inline(Box::new(Action::Announce { text, secs, color })), s, ctx);
+    }
+    fn overlay(&mut self, world: &mut World, add: Vec<Element>, remove: Vec<String>, clear: bool, ctx: &Ctx) {
+        let s = self.resolve_side("event", ctx);
+        self.exec(world, &ActionRef::Inline(Box::new(Action::Overlay { add, remove, clear })), s, ctx);
+    }
+    fn world_step(&mut self, world: &mut World, step: &Value, _ctx: &Ctx) {
+        War::world_step(self, world, step)
+    }
+    fn macro_steps(&self, name: &str) -> Option<Vec<MStep>> {
+        War::macro_steps(self, name)
+    }
+    fn get_var(&self, name: &str) -> f64 {
+        War::get_var(self, name)
+    }
+    fn set_var(&mut self, name: &str, v: f64) {
+        War::set_var(self, name, v)
+    }
+    fn warn(&mut self, msg: String) {
+        War::warn(self, msg)
+    }
+}
+
 pub fn trigger_name(t: &Trigger) -> String {
     if !t.name.is_empty() {
         return t.name.clone();
     }
     t.on.list().first().map(|s| s.to_string()).unwrap_or_else(|| "trigger".into())
-}
-
-fn interp_value(v: &mut Value, vars: &Vars) {
-    match v {
-        Value::String(s) => {
-            if s.contains('{') {
-                *s = interpolate(s, vars);
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(|x| interp_value(x, vars)),
-        Value::Object(o) => o.values_mut().for_each(|x| interp_value(x, vars)),
-        _ => {}
-    }
 }
 
 fn steps_refs(steps: &[MStep], acts: &mut Vec<ActionRef>, macros: &mut Vec<String>) {

@@ -368,6 +368,58 @@ impl Overlay {
         self.items.is_empty()
     }
 
+    /// Adds `e` after replacing the `{placeholders}` in all its text fields; an element that does not survive that is dropped.
+    pub fn add_templated(&mut self, e: &Element, vars: &Vars) -> Result<String> {
+        let mut v = serde_json::to_value(e)?;
+        interp_value(&mut v, vars);
+        Ok(self.add(serde_json::from_value::<Element>(v)?))
+    }
+
+    /// `{"add": [...], "remove": ["id"], "patch": {"id": {...}}, "clear": true}`; a bare element or array adds. `vars`
+    /// fills `{placeholders}` in what is added.
+    pub fn apply_op(&mut self, body: &Value, vars: &Vars) -> Result<Value> {
+        let mut added = vec![];
+        let mut removed = vec![];
+        let obj = body.as_object();
+        let is_op = obj.is_some_and(|o| o.contains_key("add") || o.contains_key("remove") || o.contains_key("patch") || o.contains_key("clear"));
+        if !is_op {
+            for e in parse_elements(&body.to_string())? {
+                added.push(self.add(e));
+            }
+            return Ok(serde_json::json!({"added": added}));
+        }
+        let o = obj.cloned().unwrap_or_default();
+        if o.get("clear").and_then(Value::as_bool).unwrap_or(false) {
+            self.clear();
+        }
+        if let Some(r) = o.get("remove") {
+            let ids: Vec<String> = match r {
+                Value::String(s) => vec![s.clone()],
+                Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
+                _ => bail!("remove must be an id or an array of ids"),
+            };
+            for id in ids {
+                if self.remove(&id) {
+                    removed.push(id);
+                }
+            }
+        }
+        if let Some(Value::Object(p)) = o.get("patch") {
+            for (id, patch) in p {
+                self.patch(id, patch)?;
+            }
+        }
+        if let Some(a) = o.get("add") {
+            let mut a = a.clone();
+            interp_value(&mut a, vars);
+            let wrapped = if a.is_array() { a } else { Value::Array(vec![a]) };
+            for e in parse_elements(&wrapped.to_string())? {
+                added.push(self.add(e));
+            }
+        }
+        Ok(serde_json::json!({"added": added, "removed": removed, "elements": self.len()}))
+    }
+
     pub fn list(&self) -> Vec<&Element> {
         self.items.iter().map(|i| &i.el).collect()
     }
@@ -1391,5 +1443,19 @@ mod tests {
         // the retro font is still there on request
         let (_, _, p, _) = one("HALO", "pixel", None);
         assert!(p > 20);
+    }
+}
+
+/// Replaces `{placeholders}` in every string of a JSON value.
+pub fn interp_value(v: &mut Value, vars: &Vars) {
+    match v {
+        Value::String(s) => {
+            if s.contains('{') {
+                *s = interpolate(s, vars);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| interp_value(x, vars)),
+        Value::Object(o) => o.values_mut().for_each(|x| interp_value(x, vars)),
+        _ => {}
     }
 }

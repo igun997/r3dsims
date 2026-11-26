@@ -20,16 +20,17 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::gpu::{Gpu, SceneRenderer};
 use crate::history::History;
-use crate::hud;
 use crate::overlay::{Compositor, Drawable};
 use crate::output::{Output, join_target};
 use crate::record::upscale_nearest;
 use crate::tiktok::{TikTok, TikTokOpts};
-use crate::war::{Event, Hooks, War};
+use crate::show::{Show, load_show};
+use crate::war::{Event, Hooks};
 use crate::world::World;
 
 pub struct LiveOpts {
-    pub war: PathBuf,
+    /// the show file: `war.json` (a game) or `studio.json` (any scene, no game)
+    pub show: PathBuf,
     pub listen: String,
     pub token: Option<String>,
     pub out_w: u32,
@@ -356,7 +357,7 @@ fn route_post(sh: &Shared, path: &str, body: &str) -> (u16, Value) {
 pub struct Live {
     opts: LiveOpts,
     world: World,
-    war: War,
+    show: Box<dyn Show>,
     shared: Arc<Shared>,
     rx: Receiver<Req>,
     addr: SocketAddr,
@@ -366,9 +367,9 @@ pub struct Live {
 }
 
 impl Live {
-    /// Loads the war, starts the HTTP server. No GPU yet.
+    /// Loads the show and its scene, starts the HTTP server. No GPU yet.
     pub fn start(opts: LiveOpts) -> Result<Live> {
-        let (mut world, war) = War::load(&opts.war)?;
+        let (mut world, show) = load_show(&opts.show)?;
         world.clay = opts.clay;
         if opts.out_h > opts.out_w {
             // a vertical picture (TikTok): the scene camera was authored for a wide one
@@ -379,13 +380,9 @@ impl Live {
             world.rig.cam = cam;
             world.rig.home = cam;
         }
-        let history = opts.history.clone().map(|p| {
-            let st = war.state_json();
-            let sides: Vec<(String, String)> = st["sides"].as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v["name"].as_str().unwrap_or(k).to_string())).collect()).unwrap_or_default();
-            let pair = [sides.first().cloned().unwrap_or_default(), sides.get(1).cloned().unwrap_or_default()];
-            Arc::new(History::open(p, st["title"].as_str().unwrap_or(""), pair))
-        });
-        let base_dir = opts.war.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        // a history of wins and losses only makes sense for a show that has camps
+        let history = opts.history.clone().and_then(|p| show.camps().map(|pair| Arc::new(History::open(p, &show.title(), pair))));
+        let base_dir = opts.show.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         if opts.token.as_deref().is_none_or(str::is_empty) && !opts.allow_no_token && !listen_is_loopback(&opts.listen) {
             bail!("--listen {} reaches other machines but there is no --token: the dashboard can start a broadcast and change the stream. Add --token SECRET (or --allow-no-token to accept the risk).", opts.listen);
         }
@@ -404,8 +401,8 @@ impl Live {
         let tiktok = TikTok::start(opts.tiktok.clone(), sink);
         let shared = Arc::new(Shared {
             hub: FrameHub::new(opts.quality.clamp(10, 100)),
-            state: Mutex::new(war.state_json()),
-            hooks: Mutex::new(war.hooks_json()),
+            state: Mutex::new(show.state_json()),
+            hooks: Mutex::new(show.hooks_json()),
             overlay: Mutex::new(json!([])),
             token: opts.token.clone().filter(|t| !t.is_empty()),
             history: history.clone(),
@@ -420,7 +417,7 @@ impl Live {
                 std::thread::spawn(move || handle(req, sh));
             }
         });
-        Ok(Live { opts, world, war, shared, rx, addr, base_dir, history, output })
+        Ok(Live { opts, world, show, shared, rx, addr, base_dir, history, output })
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -460,7 +457,7 @@ impl Live {
             Msg::Events(list) => {
                 let mut results = vec![];
                 for ev in list {
-                    let r = self.war.handle_event(&mut self.world, ev.clone());
+                    let r = self.show.handle_event(&mut self.world, ev.clone());
                     if self.opts.log_events {
                         eprintln!("[event] {} {} {} x{} -> {}", ev.kind, ev.user, ev.gift, ev.count, r);
                     }
@@ -468,23 +465,23 @@ impl Live {
                 }
                 json!({"ok": true, "results": results})
             }
-            Msg::Publish(h) => match self.war.publish(&self.world, h) {
+            Msg::Publish(h) => match self.show.publish(&self.world, h) {
                 Ok(v) => {
-                    *self.shared.hooks.lock().unwrap_or_else(|e| e.into_inner()) = self.war.hooks_json();
+                    *self.shared.hooks.lock().unwrap_or_else(|e| e.into_inner()) = self.show.hooks_json();
                     let mut v = v;
                     v["ok"] = json!(true);
                     v
                 }
                 Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
             },
-            Msg::Overlay(v) => match self.war.overlay_op(&v) {
+            Msg::Overlay(v) => match self.show.overlay_op(&v) {
                 Ok(mut r) => {
                     r["ok"] = json!(true);
                     r
                 }
                 Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
             },
-            Msg::Control(op) => match self.war.control(&mut self.world, &op) {
+            Msg::Control(op) => match self.show.control(&mut self.world, &op) {
                 Ok(mut r) => {
                     r["ok"] = json!(true);
                     r
@@ -540,8 +537,8 @@ impl Live {
                 let _ = req.reply.send(v);
             }
             self.output.poll();
-            self.war.update(dt, &mut self.world);
-            for ev in self.war.take_log() {
+            self.show.update(dt, &mut self.world);
+            for ev in self.show.take_log() {
                 if let Some(h) = &self.history {
                     h.append(ev);
                 }
@@ -560,10 +557,10 @@ impl Live {
             let t1 = Instant::now();
             let mut frame = upscale_nearest(&low, rw, rh, ow, oh);
             let t2 = Instant::now();
-            let vars = self.war.vars();
-            let hud_items = if self.war.hud_enabled() { hud::build(&self.war, ow, oh) } else { vec![] };
+            let vars = self.show.vars();
+            let hud_items = self.show.hud(ow, oh);
             let mut items: Vec<Drawable> = hud_items.iter().map(|(e, age, left)| Drawable { el: e, age: *age, left: *left }).collect();
-            items.extend(self.war.overlay.drawables());
+            items.extend(self.show.overlay().drawables());
             items.sort_by_key(|d| d.el.z);
             comp.draw(&mut frame, ow, oh, &items, &vars);
             drop(items);
@@ -595,7 +592,7 @@ impl Live {
             state_t += dt;
             if state_t >= 0.25 {
                 state_t = 0.0;
-                let mut st = self.war.state_json();
+                let mut st = self.show.state_json();
                 st["time"] = json!((sim * 10.0).round() / 10.0);
                 st["perf"] = perf.clone();
                 st["tiktok"] = serde_json::to_value(self.shared.tiktok.status()).unwrap_or(Value::Null);
@@ -603,7 +600,7 @@ impl Live {
                 *self.shared.output.lock().unwrap_or_else(|e| e.into_inner()) = out.clone();
                 st["output"] = out;
                 *self.shared.state.lock().unwrap_or_else(|e| e.into_inner()) = st;
-                *self.shared.overlay.lock().unwrap_or_else(|e| e.into_inner()) = serde_json::to_value(self.war.overlay.list()).unwrap_or(Value::Null);
+                *self.shared.overlay.lock().unwrap_or_else(|e| e.into_inner()) = serde_json::to_value(self.show.overlay().list()).unwrap_or(Value::Null);
             }
 
             if self.opts.seconds.is_some_and(|s| sim >= s) {
@@ -620,7 +617,7 @@ impl Live {
             }
         }
         self.output.finish();
-        let mut st = self.war.state_json();
+        let mut st = self.show.state_json();
         st["time"] = json!(sim);
         Ok(st)
     }

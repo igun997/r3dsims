@@ -1,4 +1,4 @@
-//! Macro scripts for bots. A macro is a JSON list of steps run by the war: emit synthetic viewer
+//! Macro scripts for bots. A macro is a JSON list of steps run by a show (a war or a studio): emit synthetic viewer
 //! events, fire actions, wait, loop, branch on the battle state, pick at random, call other macros.
 //! Triggers run macros when a webhook event arrives; bots run them when the stream is idle or on a
 //! timer, so the arena never sits still.
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::overlay::Element;
-use crate::war::{Action, ActionRef, Event, War};
+use crate::war::{ActionRef, Event};
 use crate::world::World;
 
 fn d_secs() -> f32 {
@@ -100,10 +100,13 @@ pub enum MStep {
         var: String,
         value: f64,
     },
+    /// `var += by`; with `from` the amount is `by` times the event's `count` ("count") or its diamonds in total ("diamonds")
     Add {
         var: String,
         #[serde(default = "one_f64")]
         by: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
     },
     Stop,
 }
@@ -144,6 +147,23 @@ pub struct Ctx {
     pub side: Option<usize>,
 }
 
+/// What a macro runs on. The steps every show shares (wait, repeat, random, if, overlay, story steps, variables, calls) live
+/// in the runner; the rest goes to the host: a war (sides, castles, rounds) or a studio (a show with no game).
+pub trait Host {
+    fn eval(&mut self, cond: &Cond, ctx: &Ctx) -> bool;
+    fn rand(&mut self) -> f32;
+    /// fire an action on a side; a studio has none
+    fn act(&mut self, world: &mut World, action: &ActionRef, side: Option<&str>, ctx: &Ctx);
+    fn inject(&mut self, world: &mut World, ev: Event);
+    fn announce(&mut self, world: &mut World, text: String, secs: f32, color: Option<String>, ctx: &Ctx);
+    fn overlay(&mut self, world: &mut World, add: Vec<Element>, remove: Vec<String>, clear: bool, ctx: &Ctx);
+    fn world_step(&mut self, world: &mut World, step: &Value, ctx: &Ctx);
+    fn macro_steps(&self, name: &str) -> Option<Vec<MStep>>;
+    fn get_var(&self, name: &str) -> f64;
+    fn set_var(&mut self, name: &str, v: f64);
+    fn warn(&mut self, msg: String);
+}
+
 enum Kind {
     Seq,
     Repeat(u32),
@@ -174,7 +194,7 @@ impl Runner {
         Runner { name: name.into(), stack: vec![Frame { steps, idx: 0, kind: Kind::Seq }], wait: 0.0, until: None, ctx, done: false, calls: 0 }
     }
 
-    pub fn tick(&mut self, dt: f32, war: &mut War, world: &mut World) {
+    pub fn tick(&mut self, dt: f32, host: &mut dyn Host, world: &mut World) {
         if self.done {
             return;
         }
@@ -192,7 +212,7 @@ impl Runner {
                 }
                 None => false,
             };
-            if !timed_out && !war.eval(cond, &self.ctx) {
+            if !timed_out && !host.eval(cond, &self.ctx) {
                 return;
             }
             self.until = None;
@@ -244,7 +264,7 @@ impl Runner {
                 MStep::Random { choices } => {
                     let total: f32 = choices.iter().map(|c| c.weight.max(0.0)).sum();
                     if total > 0.0 {
-                        let mut r = war.rand() * total;
+                        let mut r = host.rand() * total;
                         for c in choices {
                             r -= c.weight.max(0.0);
                             if r <= 0.0 {
@@ -255,52 +275,48 @@ impl Runner {
                     }
                 }
                 MStep::If { cond, then, otherwise } => {
-                    let branch = if war.eval(&cond, &self.ctx) { then } else { otherwise };
+                    let branch = if host.eval(&cond, &self.ctx) { then } else { otherwise };
                     if !branch.is_empty() {
                         self.stack.push(Frame { steps: branch, idx: 0, kind: Kind::Seq });
                     }
                 }
                 MStep::Until { cond, timeout } => {
-                    if !war.eval(&cond, &self.ctx) {
+                    if !host.eval(&cond, &self.ctx) {
                         self.until = Some((cond, timeout));
                         return;
                     }
                 }
-                MStep::Act { action, side } => {
-                    let s = war.resolve_side(side.as_deref().unwrap_or("event"), &self.ctx);
-                    war.exec(world, &action, s, &self.ctx);
-                }
-                MStep::Event(ev) => war.inject(world, ev),
-                MStep::Announce { text, secs, color } => {
-                    let s = war.resolve_side("event", &self.ctx);
-                    war.exec(world, &ActionRef::Inline(Box::new(Action::Announce { text, secs, color })), s, &self.ctx);
-                }
-                MStep::Overlay { add, remove, clear } => {
-                    let s = war.resolve_side("event", &self.ctx);
-                    war.exec(world, &ActionRef::Inline(Box::new(Action::Overlay { add, remove, clear })), s, &self.ctx);
-                }
-                MStep::Step { step } => war.world_step(world, &step),
+                MStep::Act { action, side } => host.act(world, &action, side.as_deref(), &self.ctx),
+                MStep::Event(ev) => host.inject(world, ev),
+                MStep::Announce { text, secs, color } => host.announce(world, text, secs, color, &self.ctx),
+                MStep::Overlay { add, remove, clear } => host.overlay(world, add, remove, clear, &self.ctx),
+                MStep::Step { step } => host.world_step(world, &step, &self.ctx),
                 MStep::Call { name } => {
                     self.calls += 1;
                     if self.calls > MAX_CALL_DEPTH * 50 {
-                        war.warn(format!("macro '{}': too many calls, stopped", self.name));
+                        host.warn(format!("macro '{}': too many calls, stopped", self.name));
                         self.done = true;
                         return;
                     }
-                    match war.macro_steps(&name) {
+                    match host.macro_steps(&name) {
                         Some(steps) => self.stack.push(Frame { steps, idx: 0, kind: Kind::Seq }),
-                        None => war.warn(format!("macro '{}': call to unknown macro '{name}'", self.name)),
+                        None => host.warn(format!("macro '{}': call to unknown macro '{name}'", self.name)),
                     }
                     if self.stack.len() as u32 > MAX_CALL_DEPTH {
-                        war.warn(format!("macro '{}': nested deeper than {MAX_CALL_DEPTH}, stopped", self.name));
+                        host.warn(format!("macro '{}': nested deeper than {MAX_CALL_DEPTH}, stopped", self.name));
                         self.done = true;
                         return;
                     }
                 }
-                MStep::Set { var, value } => war.set_var(&var, value),
-                MStep::Add { var, by } => {
-                    let v = war.get_var(&var) + by;
-                    war.set_var(&var, v);
+                MStep::Set { var, value } => host.set_var(&var, value),
+                MStep::Add { var, by, from } => {
+                    let amount = match (from.as_deref(), &self.ctx.event) {
+                        (Some("count"), Some(e)) => by * e.count as f64,
+                        (Some("diamonds"), Some(e)) => by * e.diamonds.max(1) as f64 * e.count as f64,
+                        _ => by,
+                    };
+                    let v = host.get_var(&var) + amount;
+                    host.set_var(&var, v);
                 }
                 MStep::Stop => {
                     self.done = true;
@@ -309,7 +325,7 @@ impl Runner {
             }
         }
         // ran a whole budget of steps without waiting: a `forever` with no wait inside. Yield a frame.
-        war.warn(format!("macro '{}': {MAX_INSTANT_STEPS} steps without a wait; pausing 0.2s (add a wait to the loop)", self.name));
+        host.warn(format!("macro '{}': {MAX_INSTANT_STEPS} steps without a wait; pausing 0.2s (add a wait to the loop)", self.name));
         self.wait = 0.2;
     }
 }

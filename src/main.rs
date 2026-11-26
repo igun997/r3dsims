@@ -11,6 +11,8 @@ use r3dsims::tiktok::TikTokOpts;
 use r3dsims::overlay::{Compositor, Overlay, Vars, parse_elements};
 use r3dsims::record::{RecordOpts, Recorder, preset_size, upscale_nearest};
 use r3dsims::story::Step;
+use r3dsims::show::{Show, is_show_file};
+use r3dsims::studio::{self, Studio};
 use r3dsims::war::{Event, War};
 use r3dsims::world::World;
 use r3dsims::{demo, emoji, harbor, house, perang, templates};
@@ -235,8 +237,8 @@ struct RenderArgs {
 
 #[derive(Args)]
 struct LiveArgs {
-    /// war.json (see `r3dsims template perang`)
-    war: PathBuf,
+    /// the show file: war.json (a game, see `r3dsims template perang`) or studio.json (any scene, no game, see `r3dsims template studio`)
+    show: PathBuf,
     /// address for webhooks and the picture
     #[arg(long, default_value = "127.0.0.1:8787")]
     listen: String,
@@ -470,13 +472,16 @@ fn cmd_render(a: RenderArgs) -> Result<()> {
     Ok(())
 }
 
-fn is_war_file(path: &PathBuf) -> bool {
-    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).is_some_and(|v| v.get("sides").is_some() && v.get("scene").is_some())
+fn is_show(path: &PathBuf) -> Option<bool> {
+    let v = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())?;
+    is_show_file(&v).then(|| v.get("sides").is_some())
 }
 
 fn cmd_validate(scene: PathBuf) -> Result<()> {
-    if is_war_file(&scene) {
-        return validate_war(scene);
+    match is_show(&scene) {
+        Some(true) => return validate_war(scene),
+        Some(false) => return validate_studio(scene),
+        None => {}
     }
     let mut world = World::load(&scene)?;
     let voxels: usize = world.models.values().map(|m| m.voxel_count()).sum();
@@ -578,6 +583,58 @@ fn validate_war(path: PathBuf) -> Result<()> {
         }
     }
     println!("  {fired} synthetic events fired triggers; no problems found");
+    Ok(())
+}
+
+/// Loads the studio (every macro, step and actor is checked), feeds each trigger a synthetic event and lets the show idle
+/// long enough for its bots to speak.
+fn validate_studio(path: PathBuf) -> Result<()> {
+    let (mut world, mut studio) = Studio::load(&path)?;
+    let hooks = studio.hooks_json();
+    let triggers = hooks["triggers"].as_array().cloned().unwrap_or_default();
+    println!(
+        "studio '{}': {} triggers, {} macros, {} bots",
+        studio.title(),
+        triggers.len(),
+        hooks["macros"].as_object().map_or(0, |m| m.len()),
+        hooks["bots"].as_array().map_or(0, |b| b.len())
+    );
+    let dt = 1.0 / 30.0;
+    let mut fired = 0;
+    for (i, t) in triggers.iter().enumerate() {
+        let pat = match &t["on"] {
+            Value::String(s) => s.clone(),
+            Value::Array(a) => a.first().and_then(Value::as_str).unwrap_or("gift:x").to_string(),
+            _ => "gift:x".to_string(),
+        };
+        println!("  trigger {:<14} on {}", t["name"].as_str().unwrap_or("?"), pat);
+        let (kind, arg) = pat.split_once(':').map(|(k, a)| (k.to_string(), a.to_string())).unwrap_or((pat.clone(), String::new()));
+        let ev = Event {
+            kind: kind.to_ascii_lowercase(),
+            user: format!("tester{}", i + 1),
+            gift: if kind.eq_ignore_ascii_case("comment") { String::new() } else { arg.clone() },
+            count: t["min_count"].as_u64().unwrap_or(0).max(2) as u32,
+            diamonds: t["min_diamonds"].as_u64().unwrap_or(0) as u32,
+            text: arg.trim_start_matches('~').to_string(),
+            side: None,
+            id: None,
+        };
+        let r = studio.handle_event(&mut world, ev);
+        if r["matched"].as_array().is_some_and(|m| m.iter().any(|x| x.as_str().is_some_and(|s| !s.contains('(')))) {
+            fired += 1;
+        }
+        for _ in 0..(3.0 / dt) as usize {
+            studio.update(dt, &mut world);
+            world.update(dt);
+        }
+    }
+    for _ in 0..(45.0 / dt) as usize {
+        studio.update(dt, &mut world);
+        world.update(dt);
+    }
+    let st = studio.state_json();
+    println!("  {fired} synthetic events fired triggers; after 45 s of quiet: vars {} goal {}", st["vars"], st["goal"]);
+    println!("  no problems found");
     Ok(())
 }
 
@@ -710,9 +767,9 @@ fn cmd_live(a: LiveArgs) -> Result<()> {
         (None, "live") => (720, 1280),
         (None, p) => preset_size(p).with_context(|| format!("unknown preset '{p}'"))?,
     };
-    let history = if a.no_history { None } else { Some(a.history.clone().unwrap_or_else(|| a.war.parent().map(|p| p.join("sessions.jsonl")).unwrap_or_else(|| PathBuf::from("sessions.jsonl")))) };
+    let history = if a.no_history { None } else { Some(a.history.clone().unwrap_or_else(|| a.show.parent().map(|p| p.join("sessions.jsonl")).unwrap_or_else(|| PathBuf::from("sessions.jsonl")))) };
     let live = Live::start(LiveOpts {
-        war: a.war,
+        show: a.show,
         listen: a.listen,
         token: a.token,
         out_w,
@@ -757,7 +814,13 @@ fn main() -> Result<()> {
                     println!("next: r3dsims validate {0}/war.json && r3dsims live {0}/war.json   (then open http://127.0.0.1:8787/view)", out.display());
                     return Ok(());
                 }
-                other => bail!("unknown template '{other}' (available: kampung, rumah, pelabuhan, perang, demo)"),
+                "studio" => {
+                    studio::write_template(&out)?;
+                    println!("wrote {0}/studio.json, {0}/scene.json and {0}/assets/*.json (a non-game live show: chat becomes speech bubbles, gifts become effects, likes fill a goal)", out.display());
+                    println!("next: r3dsims validate {0}/studio.json && r3dsims live {0}/studio.json   (then open http://127.0.0.1:8787/dashboard)", out.display());
+                    return Ok(());
+                }
+                other => bail!("unknown template '{other}' (available: kampung, rumah, pelabuhan, perang, demo, studio)"),
             }
             println!("wrote {}/scene.json and {}/assets/*.json", out.display(), out.display());
             println!("next: r3dsims validate {0}/scene.json && r3dsims render {0}/scene.json -o {1}.mp4", out.display(), name);
