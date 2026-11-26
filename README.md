@@ -13,6 +13,40 @@ Three sample dioramas, from simple to complex:
 | `rumah` | roofless two-storey dollhouse: cut-away walls, stairs, furniture, exploded floors |
 | `pelabuhan` | **complex**: fishing harbour with dock and boats, lighthouse on a hill, kampung houses, a three-storey guesthouse (two stair runs, lobby, rooms, rooftop terrace), a fisherman's hut, 72 entities (furniture, people, boats, trees), a 58 s story that walks a tourist from the beach to the rooftop |
 
+## Screenshots
+
+All of these come from `r3dsims render` on the bundled templates (720x900, 360x450 pixel render).
+
+<p align="center"><img src="docs/images/pelabuhan-story.gif" alt="pelabuhan: the tourist on the rooftop terrace" width="300"></p>
+
+**`pelabuhan`**: day, rooftop scene, exploded floors, night.
+
+<p align="center">
+<img src="docs/images/pelabuhan-day.png" alt="pelabuhan, day" width="24%">
+<img src="docs/images/pelabuhan-rooftop.png" alt="pelabuhan, rooftop terrace" width="24%">
+<img src="docs/images/pelabuhan-exploded.png" alt="pelabuhan, exploded floors" width="24%">
+<img src="docs/images/pelabuhan-night.png" alt="pelabuhan, night" width="24%">
+</p>
+
+**`rumah`**: ground floor, upper floor, exploded.
+
+<p align="center">
+<img src="docs/images/rumah-ground-floor.png" alt="rumah, ground floor" width="32%">
+<img src="docs/images/rumah-upper-floor.png" alt="rumah, upper floor" width="32%">
+<img src="docs/images/rumah-exploded.png" alt="rumah, exploded" width="32%">
+</p>
+
+**`kampung`**: day and night. **`r3dlive`**: the Rune GPU UI.
+
+<p align="center">
+<img src="docs/images/kampung-day.png" alt="kampung, day" width="24%">
+<img src="docs/images/kampung-night.png" alt="kampung, night" width="24%">
+<img src="docs/images/r3dlive-ui.png" alt="r3dlive window" width="48%">
+</p>
+
+Regenerate them: `r3dsims template pelabuhan -o harbor && r3dsims render harbor/scene.json -o shot.png --preset feed --size 720x900 --pixel 2 --at 40`
+(`rumah` stills at `--at 4 / 8.5 / 22`, `kampung` at `--at 14 / 39`).
+
 ## Install
 
 **One prompt** (paste into Claude Code, Codex or any shell-capable agent): see
