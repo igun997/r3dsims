@@ -93,7 +93,7 @@ with the CLI while it runs.
 r3dsims template demo -o demo
 r3dsims validate demo/war.json                  # checks every reference, plays a whole match headless
 r3dsims live demo/war.json --token SECRET --tiktok @username   # dashboard: http://127.0.0.1:8787/dashboard
-r3dsims output start --url rtmp://... --key KEY             # go live (TikTok gives a new key every session)
+r3dsims output start --url rtmp://... --key KEY             # go live: TikTok, Instagram (rtmps://...), YouTube, Twitch
 r3dsims send gift Rose --user Budi              # what the connector does
 r3dsims hook publish my-gifts.json              # publish new triggers / macros / bots without a restart
 r3dsims overlay add '{"type":"emoji","emoji":":fire:","size":0.2,"ttl":2}'   # text, emoji, SVG, PNG, bars on screen

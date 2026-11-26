@@ -96,7 +96,8 @@
         </div>
         <div class="kv" id="outInfo"></div>
         <div class="err" id="outErr"></div>
-        <div class="hint" style="margin-top:6px">Linux tidak punya TikTok LIVE Studio. Buka livecenter.tiktok.com, mulai LIVE, salin Server URL dan Stream key, tempel di sini lalu Mulai. TikTok membuat key baru tiap sesi; tempel yang baru tiap kali, tanpa me-restart stream. Key tidak disimpan dan tidak ditampilkan lagi.</div>
+        <div class="tip" id="outWarn"></div>
+        <div class="hint" id="outHelp" style="margin-top:6px"></div>
       </div>
 
       <h2>Skor</h2>
@@ -294,21 +295,60 @@ function renderOutput(o) {
   setBadge($('outBadge'), text, cls);
   const rows = [];
   if (o.target) rows.push(['tujuan', o.target]);
+  if (o.platform && o.platform !== 'custom') rows.push(['platform', o.platform]);
   rows.push(['video', (o.resolution || '') + ' @ ' + (o.fps || '') + ' fps, ' + (o.bitrate_k || '') + ' kbit/s']);
   if (o.active) rows.push(['berjalan', fmtDur(o.uptime_secs)]);
   if (o.restarts) rows.push(['restart otomatis', String(o.restarts)]);
   if (o.ffmpeg === false) rows.push(['ffmpeg', 'tidak ditemukan di PATH']);
   kv($('outInfo'), rows);
   $('outErr').textContent = o.error || '';
+  $('outWarn').textContent = (o.warnings || []).join(' ');
 }
-$('outServer').value = localStorage.getItem('r3d.out.server') || '';
+/* Which service an address belongs to (the server does the same in output.rs) and what to tell the person about it. */
+const PLATFORM_HELP = {
+  tiktok: 'TikTok: buka livecenter.tiktok.com, mulai LIVE, salin Server URL dan Stream key.',
+  instagram: 'Instagram: salin alamat dari Live Producer Instagram. Boleh menempel seluruh alamat rtmps://… di kolom pertama dan mengosongkan Stream key. Pilih mode Latihan dulu. Gambar harus vertikal 9:16 (live --preset live).',
+  facebook: 'Facebook: salin Server URL dan Stream key dari Live Producer Facebook.',
+  youtube: 'YouTube: salin Stream URL dan Stream key dari YouTube Studio.',
+  twitch: 'Twitch: salin ingest URL dan Stream key dari Creator Dashboard.',
+  custom: 'Tempel Server URL dan Stream key (rtmp://, rtmps://, srt://, udp://). Linux tidak punya TikTok LIVE Studio, jadi siaran dikirim sebagai RTMP.',
+};
+function platformOf(url) {
+  const u = url.toLowerCase();
+  const host = (u.split('://')[1] || '').split(/[\/?:]/)[0];
+  if (u.includes('s_vt=ig') || host.includes('instagram')) return 'instagram';
+  if (host.endsWith('fbcdn.net') || host.endsWith('facebook.com')) return 'facebook';
+  if (host.includes('tiktok')) return 'tiktok';
+  if (host.includes('youtube.com')) return 'youtube';
+  if (host.endsWith('twitch.tv')) return 'twitch';
+  return 'custom';
+}
+function showHelp() {
+  $('outHelp').textContent = PLATFORM_HELP[platformOf($('outServer').value)] + ' Key baru tiap sesi LIVE; tempel yang baru tanpa me-restart stream. Key tidak disimpan dan tidak ditampilkan lagi.';
+}
+/* The part of an address that is safe to keep in this browser: no key, no query string (a pasted full address has both). */
+function safeServer(url) {
+  try {
+    const u = new URL(url.replace(/\s+/g, ''));
+    return u.search || u.pathname.split('/').filter(Boolean).length > 1 ? '' : u.protocol + '//' + u.host + u.pathname;
+  } catch (e) { return ''; }
+}
+$('outServer').value = safeServer(localStorage.getItem('r3d.out.server') || '');
+$('outServer').oninput = showHelp;
+showHelp();
 $('outStart').onclick = async () => {
   const server = $('outServer').value.trim();
   const key = $('outKey').value.trim();
   if (!server) return log('isi Server URL dulu', 'bad');
-  localStorage.setItem('r3d.out.server', server);
   const r = await post('/output', { op: 'start', server, key, bitrate: +$('outBitrate').value || 3500 }, 'siaran mulai');
-  if (r.ok) { $('outKey').value = ''; renderOutput(r.j.output); }
+  if (r.ok) {
+    $('outKey').value = '';
+    const keep = safeServer(server);
+    $('outServer').value = keep;
+    if (keep) localStorage.setItem('r3d.out.server', keep); else localStorage.removeItem('r3d.out.server');
+    showHelp();
+    renderOutput(r.j.output);
+  }
 };
 $('outStop').onclick = async () => { const r = await post('/output', { op: 'stop' }, 'siaran stop'); if (r.ok) renderOutput(r.j.output); };
 

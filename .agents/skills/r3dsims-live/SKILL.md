@@ -31,6 +31,7 @@ Look: clay by default (`--style clay`, smooth hand-made figures, soft light, no 
 | dashboard | open `http://HOST:8787/dashboard` (`?token=SECRET`): tabs Siaran (TikTok, video output, score, match, history), Uji coba (gift buttons, events, run any macro, viewer simulator), Stream lain (other servers) |
 | TikTok connector | `live --tiktok @name [--tiktok-proxy socks5://...] [--tiktok-poll 30]` · `r3dsims tiktok status\|connect @name\|disconnect` · waits until live, rejoins by itself; private protocol, may refuse datacenter IPs (use a proxy) |
 | go live from Linux | get Server URL + Stream key at livecenter.tiktok.com (new every session) · `r3dsims output start --url rtmp://... --key KEY [--bitrate 3500]` · `output stop\|status` · key is never echoed back; restarts ffmpeg itself |
+| Instagram / Facebook / YouTube / Twitch | same `output start`; paste the whole `rtmps://...` address from the Live Producer as `--url` (no `--key`), practice mode first, run `live --preset live` (9:16); `/output` shows `platform` and `warnings`; only video out, Instagram comments need Meta's Graph API |
 | wins and losses | `r3dsims history` (every session, from `sessions.jsonl`; `--history FILE`, `--no-history`); `state.session` for the running one |
 | rounds | `r3dsims control start\|next_round\|reset\|stop\|pause\|resume\|biome:NAME\|run:NAME[:SIDE]` |
 | world theme | `r3dsims biome malam` (any key of `biomes`, or `random`) |

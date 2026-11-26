@@ -114,6 +114,25 @@ The dashboard only accepts `rtmp://`, `rtmps://`, `srt://`, `udp://`, `tcp://` a
 client overwrite files; files and stdout stay available through `--out` at start. Use `--preset live` (720x1280) for the vertical picture and
 `--bitrate 2500..4000` (kbit/s). `r3dsims output status` and `/output` report the state, uptime and restarts.
 
+### Instagram Live (and Facebook, YouTube, Twitch)
+
+The same output feeds any RTMP(S) ingest; the address tells which service it is, so the dashboard shows a short guide and the status
+carries `platform` and `warnings`. For **Instagram Live**:
+
+1. Open the Live Producer of your account (Instagram on the web, or the app's option for streaming software) and copy the address it
+   shows. It looks like `rtmps://edgetee-upload-...fbcdn.net:443/rtmp/<number>?s_bl=1&...&s_vt=ig&a=<token>`. Use **Practice** (latihan)
+   first: it connects without publishing.
+2. Paste the **whole address** into the first field of the card (leave Stream key empty), or split it into Server URL and key. Spaces
+   from copying are ignored. CLI: `r3dsims output start --url 'rtmps://.../rtmp/<number>?...'`.
+3. Run with `--preset live` (720x1280). Instagram wants 9:16, H.264 + AAC (a silent AAC track is added), 30 fps, a keyframe every 2 s,
+   about 3500 kbit/s: all of that is what the output sends. The status warns when the picture is not 9:16 or the address is `rtmp://`
+   (Instagram and Facebook accept only `rtmps://`).
+
+The token in the query string is as secret as the key: the card and `/output` show only `rtmps://host:443/rtmp/…9664`, and the dashboard
+never keeps a pasted address in the browser. Only the **video out** is covered. Reading Instagram comments needs Meta's Graph API
+(a business account and an approved app), which is not built in; until then viewer actions come from the **Uji coba** tab or from your
+own connector posting to `/webhook`.
+
 ### Running it on a Linux server
 
 ```

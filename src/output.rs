@@ -134,15 +134,60 @@ pub fn mask_target(target: &str) -> String {
     target.to_string()
 }
 
-/// Joins the server URL and the stream key the way TikTok shows them.
+/// Joins the server URL and the stream key the way the platforms show them. Spaces anywhere are dropped (a pasted address
+/// often has one after `/rtmp/`), and a whole address pasted in either field works on its own.
 pub fn join_target(server: &str, key: &str) -> String {
-    let server = server.trim();
-    let key = key.trim();
+    let clean = |s: &str| s.split_whitespace().collect::<String>();
+    let (server, key) = (clean(server), clean(key));
     if key.is_empty() {
-        server.to_string()
+        server
+    } else if server.is_empty() {
+        key
+    } else if key.contains("://") {
+        key
     } else {
         format!("{}/{}", server.trim_end_matches('/'), key.trim_start_matches('/'))
     }
+}
+
+/// The service an address belongs to, from its host (Instagram and Facebook share `fbcdn.net`; `s_vt=ig` tells them apart).
+pub fn platform_of(target: &str) -> &'static str {
+    let lower = target.to_ascii_lowercase();
+    let host = lower.split("://").nth(1).unwrap_or("").split(['/', '?', ':']).next().unwrap_or("");
+    if lower.contains("s_vt=ig") || host.contains("instagram") {
+        "instagram"
+    } else if host.ends_with("fbcdn.net") || host.ends_with("facebook.com") {
+        "facebook"
+    } else if host.contains("tiktok") {
+        "tiktok"
+    } else if host.contains("youtube.com") {
+        "youtube"
+    } else if host.ends_with("twitch.tv") {
+        "twitch"
+    } else {
+        "custom"
+    }
+}
+
+/// What is likely to go wrong for this platform with this picture.
+pub fn warnings(platform: &str, target: &str, w: u32, h: u32) -> Vec<String> {
+    let mut out = vec![];
+    let name = match platform {
+        "instagram" => "Instagram",
+        "tiktok" => "TikTok",
+        _ => "",
+    };
+    if !name.is_empty() {
+        if w >= h {
+            out.push(format!("{name} memakai gambar vertikal 9:16 tetapi stream ini {w}x{h}: jalankan live dengan --preset live (720x1280)."));
+        } else if ((w as f32 / h as f32) - 9.0 / 16.0).abs() > 0.02 {
+            out.push(format!("Rasio {w}x{h} bukan 9:16, {name} akan memotong atau memberi bingkai hitam."));
+        }
+    }
+    if matches!(platform, "instagram" | "facebook") && target.to_ascii_lowercase().starts_with("rtmp://") {
+        out.push("Instagram dan Facebook hanya menerima rtmps:// (dengan s), bukan rtmp://.".into());
+    }
+    out
 }
 
 pub struct Output {
@@ -273,6 +318,8 @@ impl Output {
     }
 
     pub fn status(&self) -> Value {
+        let platform = if self.target.is_empty() { "" } else { platform_of(&self.target) };
+        let notes = if self.target.is_empty() { vec![] } else { warnings(platform, &self.target, self.w, self.h) };
         json!({
             "state": self.state,
             "active": self.sink.is_some(),
@@ -285,6 +332,8 @@ impl Output {
             "restarts": self.restarts,
             "error": self.error,
             "ffmpeg": self.ffmpeg_ok,
+            "platform": platform,
+            "warnings": notes,
         })
     }
 }
@@ -335,5 +384,52 @@ mod tests {
         }
         assert_eq!(o.status()["state"], json!("off"));
         assert_eq!(o.status()["target"], json!(""));
+    }
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::*;
+
+    /// Shaped like an Instagram Live Producer address; the token is made up.
+    const IG_SERVER: &str = "rtmps://edgetee-upload-cgk2-1.xx.fbcdn.net:443/rtmp/";
+    const IG_KEY: &str = "10000000000000001?s_bl=1&s_fbp=sin2-2&s_ow=10&s_prp=cgk2-1&s_sw=0&s_tids=1&s_vt=ig&a=FAKETOKEN123";
+
+    #[test]
+    fn an_instagram_address_is_joined_recognised_and_its_token_hidden() {
+        let target = join_target(IG_SERVER, IG_KEY);
+        assert_eq!(target, format!("{IG_SERVER}{IG_KEY}"), "one slash, the query string kept intact");
+        assert_eq!(platform_of(&target), "instagram");
+        let shown = mask_target(&target);
+        assert_eq!(shown, "rtmps://edgetee-upload-cgk2-1.xx.fbcdn.net:443/rtmp/…0001");
+        assert!(!shown.contains("FAKETOKEN") && !shown.contains("s_vt"), "{shown}");
+        // pasted with a space after /rtmp/, as the address is often copied
+        assert_eq!(join_target("rtmps://edgetee-upload-cgk2-1.xx.fbcdn.net:443/rtmp/ ", " 10000000000000001?s_vt=ig&a=X"), "rtmps://edgetee-upload-cgk2-1.xx.fbcdn.net:443/rtmp/10000000000000001?s_vt=ig&a=X");
+        assert_eq!(join_target(&format!("{IG_SERVER} {IG_KEY}"), ""), target, "the whole address in the first field");
+        assert_eq!(join_target("", &target), target, "the whole address in the key field");
+    }
+
+    #[test]
+    fn platforms_are_told_apart_by_host() {
+        assert_eq!(platform_of("rtmps://live-api-s.facebook.com:443/rtmp/KEY"), "facebook");
+        assert_eq!(platform_of("rtmps://a.rtmp.youtube.com/live2/KEY"), "youtube");
+        assert_eq!(platform_of("rtmp://live.twitch.tv/app/KEY"), "twitch");
+        assert_eq!(platform_of("rtmp://push-rtmp-l6.tiktokcdn.com/third/KEY"), "tiktok");
+        assert_eq!(platform_of("rtmp://127.0.0.1:1935/live/test"), "custom");
+        assert_eq!(platform_of("-"), "custom");
+    }
+
+    #[test]
+    fn vertical_platforms_complain_about_a_horizontal_or_odd_picture() {
+        let ig = join_target(IG_SERVER, IG_KEY);
+        assert!(warnings("instagram", &ig, 720, 1280).is_empty(), "720x1280 is what Instagram wants");
+        assert!(warnings("instagram", &ig, 1080, 1920).is_empty());
+        let wide = warnings("instagram", &ig, 1280, 720);
+        assert!(wide.len() == 1 && wide[0].contains("--preset live"), "{wide:?}");
+        assert!(warnings("tiktok", "rtmp://x.tiktokcdn.com/a/k", 1080, 1350).iter().any(|w| w.contains("9:16")));
+        assert!(warnings("custom", "rtmp://h/a/k", 1280, 720).is_empty(), "other services take any shape");
+        // Instagram and Facebook refuse plain rtmp
+        assert!(warnings("instagram", "rtmp://edge.fbcdn.net/rtmp/k?s_vt=ig", 720, 1280).iter().any(|w| w.contains("rtmps")));
+        assert!(warnings("facebook", "rtmps://live-api-s.facebook.com:443/rtmp/k", 720, 1280).is_empty());
     }
 }
