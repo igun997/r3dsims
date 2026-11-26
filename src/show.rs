@@ -41,6 +41,10 @@ pub trait Show: Send {
     fn take_log(&mut self) -> Vec<Value>;
     /// the two camps of a game, for the history header; `None` = nothing to keep a history of
     fn camps(&self) -> Option<[(String, String); 2]>;
+    /// counters and texts fed from outside (`POST /vars`); only a show that keeps counters accepts them
+    fn set_vars(&mut self, _body: &Value) -> Result<Value> {
+        bail!("this show keeps no counters to feed; use a studio")
+    }
 }
 
 impl Show for War {

@@ -96,6 +96,18 @@ pub struct StudioDef {
     pub overlay: Vec<Element>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<Goal>,
+    /// run a macro each time this counter (or text) changes: how outside data (`POST /vars`) moves the scene
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch: Vec<Watch>,
+}
+
+/// A counter or text to watch: when it changes, `macro` runs once (not again while it is still running; the change is
+/// kept until it can start). `{var.NAME}`, `{text.NAME}` and `{user}` (the watched name) are available in the macro.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Watch {
+    pub var: String,
+    #[serde(rename = "macro")]
+    pub macro_: String,
 }
 
 struct Banner {
@@ -124,10 +136,25 @@ pub struct Studio {
     goal_hits: u32,
     rng: u64,
     warned: Vec<String>,
+    texts: BTreeMap<String, String>,
+    watch_last: Vec<String>,
 }
 
 fn num(n: f64) -> String {
-    if n.fract() == 0.0 { format!("{}", n as i64) } else { format!("{n:.1}") }
+    if n.fract() == 0.0 {
+        format!("{}", n as i64)
+    } else {
+        let s = format!("{n:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// a name a feed may set: letters, digits, `_`, `.`, `-`
+fn feed_name(k: &str) -> Result<()> {
+    if k.is_empty() || k.len() > 64 || !k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')) {
+        bail!("'{k}' is not a valid name (1-64 characters of letters, digits, _ . -)");
+    }
+    Ok(())
 }
 
 impl Studio {
@@ -165,8 +192,11 @@ impl Studio {
             goal_hits: 0,
             rng: 0x9E37_79B9_7F4A_7C15,
             warned: vec![],
+            texts: BTreeMap::new(),
+            watch_last: vec![],
             def,
         };
+        s.watch_last = vec![String::new(); s.def.watch.len()];
         s.start_scene(world)?;
         Ok(s)
     }
@@ -344,6 +374,26 @@ impl Studio {
         }
     }
 
+    fn repr(&self, var: &str) -> String {
+        match self.vars.get(var) {
+            Some(v) => num(*v),
+            None => self.texts.get(var).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn run_watches(&mut self) {
+        for (i, w) in self.def.watch.clone().iter().enumerate() {
+            let now = self.repr(&w.var);
+            if now == self.watch_last[i] || self.runners.iter().any(|r| r.name == w.macro_) {
+                continue;
+            }
+            self.watch_last[i] = now.clone();
+            let count = now.parse::<f64>().map_or(0, |n| n.clamp(0.0, u32::MAX as f64) as u32);
+            let ev = Event { kind: "watch".into(), user: w.var.clone(), gift: String::new(), count, diamonds: 0, text: now, side: None, id: None };
+            self.start_macro(&w.macro_, Ctx { event: Some(ev), side: None });
+        }
+    }
+
     fn check_goal(&mut self) {
         let Some(g) = self.def.goal.clone() else { return };
         if !g.repeat && self.goal_hits > 0 {
@@ -368,6 +418,7 @@ impl Studio {
 
     fn reset(&mut self, world: &mut World) -> Result<()> {
         self.vars = self.def.vars.clone();
+        self.texts.clear();
         self.runners.clear();
         self.overlay.clear();
         self.ticker.clear();
@@ -377,6 +428,7 @@ impl Studio {
         self.bot_t.clear();
         self.goal_target = self.def.goal.as_ref().map_or(0.0, |g| g.target);
         self.goal_hits = 0;
+        self.watch_last = vec![String::new(); self.def.watch.len()];
         self.start_scene(world)
     }
 
@@ -500,6 +552,7 @@ impl Show for Studio {
         if self.paused {
             return;
         }
+        self.run_watches();
         self.run_runners(dt, world);
         self.run_bots(dt);
         self.check_goal();
@@ -609,6 +662,9 @@ impl Show for Studio {
         for (k, val) in &self.vars {
             v.insert(format!("var.{k}"), num(*val));
         }
+        for (k, val) in &self.texts {
+            v.insert(format!("text.{k}"), val.clone());
+        }
         if let Some(g) = &self.def.goal {
             let value = self.get_var(&g.var);
             let step = g.target.max(1.0);
@@ -621,6 +677,49 @@ impl Show for Studio {
             v.insert("goal_frac".into(), format!("{:.4}", ((value - base) / span).clamp(0.0, 1.0)));
         }
         v
+    }
+
+    fn set_vars(&mut self, body: &Value) -> Result<Value> {
+        let section = |k: &str| body.get(k).and_then(Value::as_object);
+        let (set, add, text) = (section("set"), section("add"), section("text"));
+        if set.is_none() && add.is_none() && text.is_none() {
+            bail!("send {{\"set\":{{\"name\":1.5}},\"add\":{{\"name\":1}},\"text\":{{\"name\":\"words\"}}}}");
+        }
+        let number = |k: &String, v: &Value| -> Result<f64> {
+            feed_name(k)?;
+            v.as_f64().filter(|x| x.is_finite()).with_context(|| format!("'{k}' must be a number"))
+        };
+        let mut sets = vec![];
+        let mut adds = vec![];
+        let mut texts = vec![];
+        for (k, v) in set.into_iter().flatten() {
+            sets.push((k.clone(), number(k, v)?));
+        }
+        for (k, v) in add.into_iter().flatten() {
+            adds.push((k.clone(), number(k, v)?));
+        }
+        for (k, v) in text.into_iter().flatten() {
+            feed_name(k)?;
+            let s = v.as_str().with_context(|| format!("'{k}' must be a string"))?;
+            texts.push((k.clone(), s.chars().take(200).collect::<String>()));
+        }
+        let (mut names, mut tnames) = (self.vars.len(), self.texts.len());
+        names += sets.iter().chain(adds.iter()).filter(|(k, _)| !self.vars.contains_key(k)).count();
+        tnames += texts.iter().filter(|(k, _)| !self.texts.contains_key(k)).count();
+        if names > 512 || tnames > 512 {
+            bail!("too many names (at most 512 counters and 512 texts)");
+        }
+        let changed = sets.len() + adds.len() + texts.len();
+        for (k, v) in sets {
+            self.vars.insert(k, v);
+        }
+        for (k, v) in adds {
+            *self.vars.entry(k).or_insert(0.0) += v;
+        }
+        for (k, v) in texts {
+            self.texts.insert(k, v);
+        }
+        Ok(json!({"changed": changed}))
     }
 
     fn hud(&self, w: usize, h: usize) -> Vec<HudItem> {
@@ -643,6 +742,7 @@ impl Show for Studio {
             "idle_secs": (self.idle * 10.0).round() / 10.0,
             "events_seen": self.events_seen,
             "vars": vars,
+            "texts": self.texts,
             "goal": self.def.goal.as_ref().map(|g| json!({"var": g.var, "label": g.label, "value": self.get_var(&g.var), "target": self.goal_target, "reached": self.goal_hits})),
             "sides": {},
             "autopilot": false,
@@ -693,22 +793,55 @@ fn check_cond(c: &Cond, ctx: &str, errs: &mut Vec<String>) {
 }
 
 /// Every `actor` named in a story step must exist in the scene (unless it is a `{placeholder}`).
-fn check_actors(v: &Value, world: &World, ctx: &str, errs: &mut Vec<String>) {
+fn check_actors(v: &Value, known: &dyn Fn(&str) -> bool, ctx: &str, errs: &mut Vec<String>) {
     match v {
         Value::Object(o) => {
             if let Some(Value::String(a)) = o.get("actor") {
-                if !a.contains('{') && world.entity_idx(a).is_none() {
-                    errs.push(format!("{ctx}: unknown actor '{a}' (not an entity of the scene)"));
+                if !a.contains('{') && !known(a) {
+                    errs.push(format!("{ctx}: unknown actor '{a}' (not an entity of the scene, nor one a macro spawns)"));
                 }
             }
-            o.values().for_each(|x| check_actors(x, world, ctx, errs));
+            o.values().for_each(|x| check_actors(x, known, ctx, errs));
         }
-        Value::Array(a) => a.iter().for_each(|x| check_actors(x, world, ctx, errs)),
+        Value::Array(a) => a.iter().for_each(|x| check_actors(x, known, ctx, errs)),
         _ => {}
     }
 }
 
-fn check_steps(steps: &[MStep], def: &StudioDef, world: &World, ctx: &str, errs: &mut Vec<String>) {
+/// Ids of the entities a macro brings into the scene with a `spawn` step, and a note for every asset that does not exist.
+fn collect_spawns(v: &Value, world: &World, ids: &mut std::collections::HashSet<String>, errs: &mut Vec<String>) {
+    match v {
+        Value::Object(o) => {
+            if o.get("do").and_then(Value::as_str) == Some("spawn") {
+                if let Some(e) = o.get("entity") {
+                    if let Some(id) = e.get("id").and_then(Value::as_str) {
+                        ids.insert(id.to_string());
+                    }
+                    if let Some(a) = e.get("asset").and_then(Value::as_str) {
+                        if !a.contains('{') && !world.models.contains_key(a) && !Path::new(a).exists() {
+                            errs.push(format!("spawn: unknown asset '{a}' (an `assets` key of the scene)"));
+                        }
+                    }
+                }
+            }
+            o.values().for_each(|x| collect_spawns(x, world, ids, errs));
+        }
+        Value::Array(a) => a.iter().for_each(|x| collect_spawns(x, world, ids, errs)),
+        _ => {}
+    }
+}
+
+/// A copy of a step in which every `"={...}"` string is a number, so a step that will be fed a number can be checked at load.
+fn numbers_for_placeholders(v: &Value) -> Value {
+    match v {
+        Value::String(s) if s.starts_with("={") && s.ends_with('}') => Value::from(0),
+        Value::Array(a) => Value::Array(a.iter().map(numbers_for_placeholders).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), numbers_for_placeholders(x))).collect()),
+        other => other.clone(),
+    }
+}
+
+fn check_steps(steps: &[MStep], def: &StudioDef, known: &dyn Fn(&str) -> bool, ctx: &str, errs: &mut Vec<String>) {
     for s in steps {
         match s {
             MStep::Act { .. } => errs.push(format!("{ctx}: `act` fires a game action; a studio uses overlay, step, announce, set and add")),
@@ -717,20 +850,21 @@ fn check_steps(steps: &[MStep], def: &StudioDef, world: &World, ctx: &str, errs:
                     errs.push(format!("{ctx}: calls unknown macro '{name}'"));
                 }
             }
-            MStep::Repeat { steps, .. } | MStep::Forever { steps } => check_steps(steps, def, world, ctx, errs),
-            MStep::Random { choices } => choices.iter().for_each(|c| check_steps(&c.steps, def, world, ctx, errs)),
+            MStep::Repeat { steps, .. } | MStep::Forever { steps } => check_steps(steps, def, known, ctx, errs),
+            MStep::Random { choices } => choices.iter().for_each(|c| check_steps(&c.steps, def, known, ctx, errs)),
             MStep::If { cond, then, otherwise } => {
                 check_cond(cond, ctx, errs);
-                check_steps(then, def, world, ctx, errs);
-                check_steps(otherwise, def, world, ctx, errs);
+                check_steps(then, def, known, ctx, errs);
+                check_steps(otherwise, def, known, ctx, errs);
             }
             MStep::Until { cond, .. } => check_cond(cond, ctx, errs),
             MStep::Step { step } => {
-                let ok = serde_json::from_value::<crate::story::Step>(step.clone()).is_ok() || serde_json::from_value::<crate::camera::CameraCmd>(step.clone()).is_ok();
+                let probe = numbers_for_placeholders(step);
+                let ok = serde_json::from_value::<crate::story::Step>(probe.clone()).is_ok() || serde_json::from_value::<crate::camera::CameraCmd>(probe).is_ok();
                 if !ok {
                     errs.push(format!("{ctx}: {step} is not a story or camera step"));
                 }
-                check_actors(step, world, ctx, errs);
+                check_actors(step, known, ctx, errs);
             }
             _ => {}
         }
@@ -750,8 +884,13 @@ fn validate(def: &StudioDef, world: &World) -> Result<()> {
             }
         }
     }
+    let mut spawned = std::collections::HashSet::new();
+    for steps in def.macros.values() {
+        collect_spawns(&serde_json::to_value(steps).unwrap_or(Value::Null), world, &mut spawned, &mut errs);
+    }
+    let known = |a: &str| world.entity_idx(a).is_some() || spawned.contains(a);
     for (name, steps) in &def.macros {
-        check_steps(steps, def, world, &format!("macro '{name}'"), &mut errs);
+        check_steps(steps, def, &known, &format!("macro '{name}'"), &mut errs);
     }
     for b in &def.bots {
         if !def.macros.contains_key(&b.macro_) {
@@ -769,6 +908,14 @@ fn validate(def: &StudioDef, world: &World) -> Result<()> {
             if !def.macros.contains_key(m) {
                 errs.push(format!("goal: unknown macro '{m}'"));
             }
+        }
+    }
+    for w in &def.watch {
+        if w.var.is_empty() {
+            errs.push("watch: a watch needs a var".into());
+        }
+        if !def.macros.contains_key(&w.macro_) {
+            errs.push(format!("watch '{}': unknown macro '{}'", w.var, w.macro_));
         }
     }
     if errs.is_empty() { Ok(()) } else { bail!("{}", errs.join("\n")) }

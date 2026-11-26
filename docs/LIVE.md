@@ -241,6 +241,25 @@ r3dsims send like 20
   win/loss history without camps. The dashboard hides what only a game has.
 * `r3dsims hook publish` works the same way (triggers, macros, bots, gift aliases); a studio refuses `actions` and `units`.
 
+### Feeding a studio from outside (your own data, not only viewers)
+
+A studio can show live data from anywhere: a database, an API, a sensor. A small program of yours reads the source and
+`POST`s the numbers; the studio reacts.
+
+```
+r3dsims vars '{"set":{"lv1":3,"x1":0.62},"add":{"visits":1},"text":{"nama1":"Al-Hidayah"}}'     # or POST /vars (token needed)
+```
+
+* `set` and `add` change counters (numbers), `text` sets texts (cut at 200 characters). Names are 1-64 characters of
+  letters, digits, `_ . -`. The whole body is checked first: one bad entry changes nothing. At most 512 of each.
+* Show them anywhere text is drawn with `{var.NAME}` and `{text.NAME}`; a bar can `bind` to `var.NAME` (3 decimals kept).
+* `"watch": [{"var": "lv1", "macro": "naik"}]` runs a macro when that counter (or text) changes. A change is never lost: if
+  the macro still runs, the watch waits for it to finish and then runs once with the newest value.
+* In a `step`, a string that is exactly `"={var.x1}"` becomes a number, so a fed value can place or size something:
+  `{"do":"spawn","entity":{"id":"p1","asset":"gedung","pos":["={var.x1}","={var.z1}"],"scale":"={var.skala1}","label":"{text.nama1}"}}`.
+* `spawn` steps may use any asset of the scene; the actor ids a macro spawns are known to `validate`, so later steps may
+  name them.
+
 ## war.json
 
 ```json

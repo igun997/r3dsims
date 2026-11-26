@@ -65,6 +65,7 @@ pub enum Msg {
     Control(String),
     Command(String),
     Output(Value),
+    Vars(Value),
 }
 
 pub struct Req {
@@ -287,7 +288,7 @@ fn handle(mut req: Request, sh: Arc<Shared>) {
             .with_header(header("Access-Control-Allow-Origin", "*"))
             .with_header(header("Access-Control-Allow-Headers", "authorization, content-type, x-token"))
             .with_header(header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")),
-        (Method::Post, "/webhook" | "/event" | "/events" | "/hooks" | "/overlay" | "/control" | "/command" | "/tiktok" | "/output") => {
+        (Method::Post, "/webhook" | "/event" | "/events" | "/hooks" | "/overlay" | "/control" | "/command" | "/tiktok" | "/output" | "/vars") => {
             if !authorised(&req, &sh, query) {
                 let _ = req.respond(json_response(401, &json!({"ok": false, "error": "missing or wrong token"})));
                 return;
@@ -341,6 +342,10 @@ fn route_post(sh: &Shared, path: &str, body: &str) -> (u16, Value) {
             let op = serde_json::from_str::<Value>(body).ok().and_then(|v| v.get("op").and_then(Value::as_str).map(str::to_string)).unwrap_or_else(|| body.trim().trim_matches('"').to_string());
             Msg::Control(op)
         }
+        "/vars" => match serde_json::from_str::<Value>(body) {
+            Ok(v) => Msg::Vars(v),
+            Err(e) => return bad(anyhow!("vars JSON: {e}")),
+        },
         "/output" => match serde_json::from_str::<Value>(body) {
             Ok(v) => Msg::Output(v),
             Err(e) => return bad(anyhow!("output JSON: {e}")),
@@ -493,6 +498,13 @@ impl Live {
                 Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
             },
             Msg::Output(v) => self.output_cmd(&v),
+            Msg::Vars(v) => match self.show.set_vars(&v) {
+                Ok(mut r) => {
+                    r["ok"] = json!(true);
+                    r
+                }
+                Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
+            },
         }
     }
 

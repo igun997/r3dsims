@@ -59,6 +59,12 @@ enum Cmd {
         #[command(flatten)]
         conn: Conn,
     },
+    /// Feed counters and texts into a running studio: `{"set":{"x":1},"add":{"y":2},"text":{"name":"Al-Hidayah"}}` (JSON file, `-` or a string).
+    Vars {
+        source: String,
+        #[command(flatten)]
+        conn: Conn,
+    },
     /// Switch the biome of a running `live` (a key of `biomes`, or random).
     Biome {
         name: String,
@@ -852,6 +858,7 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
+        Cmd::Vars { source, conn } => show(&conn.client()?, "POST", "/vars", Some(&read_source(&source)?)),
         Cmd::Control { op, conn } => show(&conn.client()?, "POST", "/control", Some(&json!({"op": op}).to_string())),
         Cmd::State { conn } => show(&conn.client()?, "GET", "/state", None),
         Cmd::History { json, conn } => cmd_history(&conn.client()?, json),

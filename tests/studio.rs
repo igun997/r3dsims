@@ -135,6 +135,45 @@ fn a_silent_stream_is_kept_alive_by_the_idle_bot() {
 }
 
 #[test]
+fn a_fed_counter_moves_the_scene_through_a_watch() {
+    let dir = project("feed");
+    let path = dir.join("studio.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    v["macros"]["pasang"] = json!([
+        {"do": "step", "step": {"do": "spawn", "entity": {"id": "lencana", "asset": "house", "pos": ["={var.x}", "={var.z}"], "label": "{text.nama}"}}},
+        {"do": "add", "var": "ran"}
+    ]);
+    v["watch"] = json!([{"var": "x", "macro": "pasang"}]);
+    std::fs::write(&path, v.to_string()).unwrap();
+    let (mut world, mut show) = load_show(&path).unwrap();
+
+    // a bad feed is refused whole and changes nothing
+    assert!(show.set_vars(&json!({"set": {"bad name": 1}})).is_err());
+    assert!(show.set_vars(&json!({"set": {"x": "nope"}})).is_err());
+    assert!(show.set_vars(&json!({"set": {"x": 5}, "text": {"nama": 3}})).is_err());
+    assert!(show.set_vars(&json!({})).is_err());
+    sim(show.as_mut(), &mut world, 0.5);
+    assert!(show.state_json()["vars"]["x"].is_null(), "nothing was applied");
+
+    show.set_vars(&json!({"set": {"x": 20.0, "z": 9.5}, "text": {"nama": "Al-Hidayah"}})).unwrap();
+    sim(show.as_mut(), &mut world, 1.0);
+    let i = world.entity_idx("lencana").expect("the watch ran its macro and spawned the entity");
+    assert_eq!((world.entities[i].pos.x, world.entities[i].pos.z), (20.0, 9.5), "a \"={{var.x}}\" string became a number");
+    assert_eq!(world.entities[i].label.as_deref(), Some("Al-Hidayah"));
+    assert_eq!(show.state_json()["vars"]["ran"], json!(1.0));
+    assert_eq!(show.state_json()["texts"]["nama"], json!("Al-Hidayah"));
+    assert_eq!(show.vars()["text.nama"], "Al-Hidayah");
+
+    // the same value again is not a change; a new one is
+    show.set_vars(&json!({"set": {"x": 20.0}})).unwrap();
+    sim(show.as_mut(), &mut world, 0.5);
+    assert_eq!(show.state_json()["vars"]["ran"], json!(1.0));
+    show.set_vars(&json!({"add": {"x": 1}})).unwrap();
+    sim(show.as_mut(), &mut world, 0.5);
+    assert_eq!(show.state_json()["vars"]["ran"], json!(2.0));
+}
+
+#[test]
 fn pause_resume_and_reset() {
     let (mut world, mut show) = load("ctl");
     show.handle_event(&mut world, ev("like", "A", "", 7, ""));

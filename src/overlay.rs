@@ -1446,12 +1446,16 @@ mod tests {
     }
 }
 
-/// Replaces `{placeholders}` in every string of a JSON value.
+/// Replaces `{placeholders}` in every string of a JSON value. A string that is exactly `"={...}"` becomes a number when the
+/// result parses as one (`"at": ["={var.x1}", 4]`): that is how a counter fed from outside moves or sizes something.
 pub fn interp_value(v: &mut Value, vars: &Vars) {
     match v {
-        Value::String(s) => {
-            if s.contains('{') {
-                *s = interpolate(s, vars);
+        Value::String(s) if s.contains('{') => {
+            let numeric = s.len() > 3 && s.starts_with("={") && s.ends_with('}') && !s[2..s.len() - 1].contains(['{', '}']);
+            let out = interpolate(if numeric { &s[1..] } else { s.as_str() }, vars);
+            match out.trim().parse::<f64>() {
+                Ok(n) if numeric && n.is_finite() => *v = if n.fract() == 0.0 && n.abs() < 9e15 { Value::from(n as i64) } else { Value::from(n) },
+                _ => *s = out,
             }
         }
         Value::Array(a) => a.iter_mut().for_each(|x| interp_value(x, vars)),
