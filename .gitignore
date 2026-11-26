@@ -12,3 +12,12 @@
 /.claude/skills/rust-port/
 /.agents/skills/rcargo/
 /.agents/skills/rust-port/
+
+# projects written by `r3dsims template NAME` in the repo root while trying things out
+/demo/
+/war/
+/perang/
+/kampung/
+/rumah/
+/pelabuhan/
+/harbor/
