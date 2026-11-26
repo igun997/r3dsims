@@ -26,13 +26,22 @@ pub fn preset_size(name: &str) -> Option<(u32, u32)> {
 
 pub fn upscale_nearest(src: &[u8], sw: usize, sh: usize, ow: usize, oh: usize) -> Vec<u8> {
     let mut out = vec![0u8; ow * oh * 3];
+    let xmap: Vec<usize> = (0..ow).map(|x| (x * sw / ow).min(sw - 1) * 3).collect();
+    let mut prev_sy = usize::MAX;
     for y in 0..oh {
         let sy = (y * sh / oh).min(sh - 1);
-        for x in 0..ow {
-            let sx = (x * sw / ow).min(sw - 1);
-            let (s, d) = ((sy * sw + sx) * 3, (y * ow + x) * 3);
-            out[d..d + 3].copy_from_slice(&src[s..s + 3]);
+        let (before, row) = out.split_at_mut(y * ow * 3);
+        let row = &mut row[..ow * 3];
+        if sy == prev_sy {
+            // same source row as the output row above: copy it
+            row.copy_from_slice(&before[(y - 1) * ow * 3..y * ow * 3]);
+        } else {
+            let line = &src[sy * sw * 3..(sy + 1) * sw * 3];
+            for (px, &sx) in row.chunks_exact_mut(3).zip(&xmap) {
+                px.copy_from_slice(&line[sx..sx + 3]);
+            }
         }
+        prev_sy = sy;
     }
     out
 }

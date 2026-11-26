@@ -21,6 +21,8 @@ r3dsims render scene.json -o reel.mp4 --audio music.mp3 --commands cmds.json
 * `--commands cmds.json` adds timed steps without editing the scene:
   `[{"at":2,"do":"camera","op":"orbit","dyaw":90,"secs":3},{"at":6,"do":"building","id":"b","gap":3}]`.
   Any step works (camera, say, play, building, set_sky, spawn).
+* `--overlay overlay.json` draws text, emoji (`🌹` or `:rose:`), SVG, PNG and bars on every frame
+  (`from`/`until` in seconds; same elements as `r3dsims overlay add`, see `docs/LIVE.md`), `--emoji-dir DIR` adds more emoji.
 * Renders are deterministic for one GPU adapter; a render of 40 s at 1080x1920 takes under a minute
   on a laptop GPU (the H.264 encode dominates).
 

@@ -94,7 +94,7 @@ impl Camera {
         }
     }
 
-    fn lerp(a: &Camera, b: &Camera, u: f32) -> Camera {
+    pub fn lerp(a: &Camera, b: &Camera, u: f32) -> Camera {
         Camera {
             target: a.target.lerp(b.target, u),
             yaw: a.yaw + (b.yaw - a.yaw) * u,

@@ -55,6 +55,15 @@ pub struct SceneDef {
     pub camera: CamParams,
 }
 
+/// Recolour of one terrain legend tile (a biome swaps these).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct TilePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EntityDef {
     pub id: String,
@@ -169,6 +178,33 @@ impl Sky {
                 ground: Vec3::new(0.38, 0.32, 0.32),
                 light_dir: sun_dir(80.0, 22.0),
                 glow: 0.3,
+            },
+            "desert" => Sky {
+                top: Vec3::new(0.62, 0.78, 0.93),
+                bottom: Vec3::new(1.0, 0.90, 0.70),
+                sun_color: Vec3::new(1.0, 0.88, 0.66) * 0.98,
+                ambient: Vec3::new(0.66, 0.60, 0.55),
+                ground: Vec3::new(0.50, 0.40, 0.28),
+                light_dir: sun_dir(70.0, 58.0),
+                glow: 0.0,
+            },
+            "snow" => Sky {
+                top: Vec3::new(0.66, 0.76, 0.88),
+                bottom: Vec3::new(0.93, 0.96, 0.99),
+                sun_color: Vec3::new(0.95, 0.97, 1.0) * 0.88,
+                ambient: Vec3::new(0.66, 0.70, 0.80),
+                ground: Vec3::new(0.55, 0.58, 0.62),
+                light_dir: sun_dir(60.0, 38.0),
+                glow: 0.1,
+            },
+            "lava" => Sky {
+                top: Vec3::new(0.16, 0.06, 0.07),
+                bottom: Vec3::new(0.78, 0.28, 0.12),
+                sun_color: Vec3::new(1.0, 0.45, 0.25) * 0.85,
+                ambient: Vec3::new(0.52, 0.31, 0.31),
+                ground: Vec3::new(0.30, 0.12, 0.10),
+                light_dir: sun_dir(110.0, 26.0),
+                glow: 0.55,
             },
             "night" => Sky {
                 top: Vec3::new(0.04, 0.06, 0.17),
@@ -317,6 +353,8 @@ impl Entity {
 pub struct World {
     pub name: String,
     pub terrain: Terrain,
+    /// Tile legend of the ground as authored (kept so biomes can recolour it).
+    pub terrain_def: TerrainDef,
     pub entities: Vec<Entity>,
     pub models: HashMap<String, Arc<Model>>,
     pub markers: HashMap<String, Place>,
@@ -324,6 +362,8 @@ pub struct World {
     pub sky: Sky,
     pub rig: CameraRig,
     pub time: f32,
+    /// Temporary offset added to the camera target when rendering (impact shake).
+    pub cam_shake: Vec3,
     pub nav: Nav,
     pub stages: Vec<StageDef>,
     pub story_loop: bool,
@@ -383,6 +423,7 @@ impl World {
         let mut w = World {
             name: def.name.clone(),
             terrain,
+            terrain_def,
             entities: vec![],
             models,
             markers: HashMap::new(),
@@ -392,6 +433,7 @@ impl World {
             sky_tween: None,
             rig: CameraRig::new(cam),
             time: 0.0,
+            cam_shake: Vec3::ZERO,
             nav,
             stages: vec![],
             story_loop: false,
@@ -575,15 +617,67 @@ impl World {
             home_layer: layer,
             model,
         });
-        self.rebuild_nav();
+        if d.footprint != [0.0, 0.0] {
+            self.rebuild_nav();
+        }
+        Ok(())
+    }
+
+    /// Recolours legend tile types (`top` / `side`) and rebuilds the ground mesh; heights are unchanged.
+    pub fn retheme(&mut self, patch: &BTreeMap<String, TilePatch>) -> Result<()> {
+        let mut def = self.terrain_def.clone();
+        for (k, p) in patch {
+            let t = def.legend.get_mut(k).ok_or_else(|| anyhow!("terrain legend has no tile '{k}'"))?;
+            if let Some(top) = &p.top {
+                t.top = top.clone();
+            }
+            if let Some(side) = &p.side {
+                t.side = Some(side.clone());
+            }
+        }
+        self.terrain = Terrain::build(&def).context("rebuild terrain")?;
+        self.terrain_def = def;
+        Ok(())
+    }
+
+    /// Swaps the model of entity `id` for `asset`; position and orientation stay.
+    pub fn set_asset(&mut self, id: &str, asset: &str) -> Result<()> {
+        let i = self.entity_idx(id).ok_or_else(|| anyhow!("no entity '{id}'"))?;
+        let model = match self.models.get(asset) {
+            Some(m) => m.clone(),
+            None => {
+                let m = Arc::new(load_model(&self.base_dir.join(asset)).map_err(|e| anyhow!("unknown asset '{asset}': {e:#}"))?);
+                self.models.insert(asset.to_string(), m.clone());
+                m
+            }
+        };
+        let n = model.parts.len();
+        let e = &mut self.entities[i];
+        e.colors = model.colors.clone();
+        e.extra.clear();
+        e.pose = vec![Pose::default(); n];
+        e.anim = AnimState { base: "idle".into(), oneshot: None, oneshot_loop: false, t: id_phase(id) * 2.0, cur: "idle".into(), fade: FADE, from: vec![Pose::default(); n] };
+        e.model = model;
+        Ok(())
+    }
+
+    /// Recolours palette key `key` of entity `id` (`#rrggbb`); the key's material stays.
+    pub fn set_palette(&mut self, id: &str, key: &str, hex: &str) -> Result<()> {
+        let i = self.entity_idx(id).ok_or_else(|| anyhow!("no entity '{id}'"))?;
+        let idx = *self.entities[i].model.color_names.get(key).ok_or_else(|| anyhow!("asset has no palette key '{key}'"))?;
+        let c = parse_hex(hex).ok_or_else(|| anyhow!("bad colour '{hex}'"))?.0;
+        self.entities[i].colors[idx as usize] = c;
         Ok(())
     }
 
     pub fn remove(&mut self, id: &str) -> bool {
         match self.entity_idx(id) {
             Some(i) => {
+                let blocking = self.entities[i].footprint != [0.0, 0.0];
                 self.entities.remove(i);
-                self.rebuild_nav();
+                if blocking {
+                    self.rebuild_nav();
+                }
                 true
             }
             None => false,

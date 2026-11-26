@@ -15,13 +15,16 @@ default-members = ["."]
 [dependencies]
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 gif = "0.13"
 glam = "0.29"
 png = "0.17"
 pollster = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+jpeg-encoder = "0.7"
+resvg = "0.50"
+tiny_http = "0.12"
 wgpu = { version = "~30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

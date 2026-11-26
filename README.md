@@ -2,16 +2,19 @@
 
 A scriptable voxel-pixel diorama sandbox in Rust, rendered on the GPU (wgpu). Assets are tiny
 modular JSON (or Rust-built) voxel models with procedural materials, behaviour is story scenes, the
-camera takes events from a person or an agent, and the result can be watched live (Rune GPU UI) or
-rendered/recorded headless for Instagram.
+camera takes events from a person or an agent, and the result can be watched live (Rune GPU UI),
+rendered/recorded headless for Instagram, or **streamed live with webhooks**: gifts, likes and comments from a
+platform connector turn into meteors, speeches, water cannons or first-person ultimates in a war between two sides.
 
-Three sample dioramas, from simple to complex:
+Sample dioramas, from simple to complex (the last two are for `r3dsims live`):
 
 | template | what |
 | --- | --- |
 | `kampung` | island village: houses, palms, well, stall, four villagers, day to night |
 | `rumah` | roofless two-storey dollhouse: cut-away walls, stairs, furniture, exploded floors |
 | `pelabuhan` | **complex**: fishing harbour with dock and boats, lighthouse on a hill, kampung houses, a three-storey guesthouse (two stair runs, lobby, rooms, rooftop terrace), a fisherman's hut, 72 entities (furniture, people, boats, trees), a 58 s story that walks a tourist from the beach to the rooftop |
+| `perang` | **live**: two kingdoms side by side, rounds, castles, knights/archers/giants, meteors, lightning, arrow rain, ultimates with first-person camera, four biomes |
+| `demo` | **live**: a parody street demonstration, citizens vs government, endless day and night: speeches raise morale, rice packs heal, barricades, molotov bottles, water cannon, tear gas, foreign aid or corruption, intelligence sabotage, bribes that turn protesters, ultimates |
 
 ## Screenshots
 
@@ -78,10 +81,49 @@ r3dlive --demo pelabuhan                        # live window (Rune): orbit, flo
 r3dlive --file harbor/scene.json
 ```
 
+## Live streaming (webhook in, picture out)
+
+The platform connector is another application: it `POST`s viewer events to `r3dsims live` and takes the picture from
+`/stream.mjpg`, `--out rtmp://...`, `--out srt://...` or `--out -` (MPEG-TS on stdout). You author and change the show
+with the CLI while it runs.
+
+```
+r3dsims template demo -o demo
+r3dsims validate demo/war.json                  # checks every reference, plays a whole match headless
+r3dsims live demo/war.json --token SECRET       # http://127.0.0.1:8787/view
+r3dsims send gift Rose --user Budi              # what the connector does
+r3dsims hook publish my-gifts.json              # publish new triggers / macros / bots without a restart
+r3dsims overlay add '{"type":"emoji","emoji":":fire:","size":0.2,"ttl":2}'   # text, emoji, SVG, PNG, bars on screen
+r3dsims biome malam                             # day / night / desert / snow / lava ...
+r3dsims state                                   # round, support, winner, biome, fps
+```
+
+Rounds or endless with a winner, per-gift effects, macro scripts and bots, ultimates with their own camera look
+(ordinary skills never move the camera), biomes, and an autopilot that keeps an empty stream alive. Reference:
+[`docs/LIVE.md`](docs/LIVE.md); skill: `r3dsims-live`.
+
+`demo` (citizens vs government), day and night, and the two ultimates seen first-person from each camp:
+
+<p align="center">
+<img src="docs/images/live-demo-day.jpg" alt="demo, day" width="49%">
+<img src="docs/images/live-demo-night.jpg" alt="demo, night biome" width="49%">
+<img src="docs/images/live-demo-fpv-police.jpg" alt="demo, ultimate seen through a policeman's eyes" width="49%">
+<img src="docs/images/live-demo-fpv-crowd.jpg" alt="demo, ultimate seen from inside the crowd" width="49%">
+</p>
+
+`perang` (two kingdoms): a battle, the whale ultimate (blue tsunami), the lava biome, the galaxy ultimate (looks up at the meteors):
+
+<p align="center">
+<img src="docs/images/live-perang-battle.jpg" alt="perang, battle" width="49%">
+<img src="docs/images/live-perang-whale-fpv.jpg" alt="perang, whale ultimate first person" width="49%">
+<img src="docs/images/live-perang-lava.jpg" alt="perang, lava biome" width="49%">
+<img src="docs/images/live-perang-galaxy-fpv.jpg" alt="perang, galaxy ultimate first person" width="49%">
+</p>
+
 ## Agent skills
 
 `.claude/skills/` (mirrored in `.agents/skills/`): `r3dsims` (start here), `r3dsims-assets`,
-`r3dsims-scenes`, `r3dsims-record`, `r3dsims-install`. They are packaged into every release and
+`r3dsims-scenes`, `r3dsims-record`, `r3dsims-live`, `r3dsims-install`. They are packaged into every release and
 installed by `scripts/install.sh`.
 
 ## Build and release

@@ -1,0 +1,310 @@
+# Live streaming: war, or a street demonstration, driven by webhooks
+
+`r3dsims live` runs a diorama in real time and does two things only:
+
+1. **takes webhooks** (a viewer sent a gift, liked, commented) and turns them into effects that already
+   exist in the diorama (meteors, lightning, arrow rain, reinforcements, shields, ...);
+2. **delivers the picture** (MJPEG over HTTP, and/or ffmpeg to `rtmp://`, `srt://`, a file, stdout).
+
+The platform connector (TikTok, YouTube, ...) is **another application**. It only has to `POST` JSON to
+`/webhook` and point its video input at `/stream.mjpg` or at the ffmpeg output. Everything else, how
+the war is built, which gift does what, what the screen shows, is data you author and change with the CLI.
+
+```
+ connector app  --POST /webhook-->  r3dsims live  --/stream.mjpg | rtmp | srt-->  OBS / platform
+ agent + CLI    --hook/overlay/control-->  (same process, hot, no restart)
+```
+
+## Quick start
+
+Two ready-made worlds, same engine: `perang` (two kingdoms at war, rounds) and `demo` (citizens vs
+government: a parody street demonstration, endless, day and night).
+
+```
+r3dsims template demo -o demo           # or: perang. scene + assets + war.json
+r3dsims validate demo/war.json          # checks every reference, plays a whole match headless
+r3dsims live demo/war.json --log-events # http://127.0.0.1:8787/view shows the stream
+r3dsims send gift Rose --user Budi      # what the connector does; in `demo`, ROSE = a speech (morale up)
+r3dsims state                           # round, support, winner, biome, macros, top supporters
+```
+
+Picture out:
+
+| how | use |
+| --- | --- |
+| `http://HOST:8787/view` | a page for an OBS *Browser Source* or any browser |
+| `http://HOST:8787/stream.mjpg` | multipart JPEG (`<img src>`, ffmpeg `-f mjpeg`, VLC) |
+| `http://HOST:8787/frame.jpg` | latest frame |
+| `--out rtmp://live.example/app/KEY` | ffmpeg pushes H.264 FLV (needs `ffmpeg`) |
+| `--out srt://...` / `udp://...` | MPEG-TS over SRT / UDP |
+| `--out -` | MPEG-TS on stdout, pipe it to your connector: `r3dsims live war.json --out - \| other-app` |
+| `--out match.mp4` | record the whole stream to a file |
+
+Size: `--preset live-wide` (1280x720, default), `live` (720x1280), any `render` preset, or `--size WxH`.
+`--pixel 1` (default) renders at the output size: fine pixels. `--pixel 2` renders at half the size and
+upscales with nearest-neighbour: chunky pixel art, half the GPU cost. `r3dsims state` shows the measured fps and
+where the frame time goes (`perf`).
+For a portrait (TikTok) stream send a camera command once: `r3dsims step '{"op":"set","yaw":90,"zoom":46}'`.
+
+## Webhook contract (what the connector sends)
+
+`POST /webhook`, body = one event, an array, or `{"events": [...]}`. Auth when `--token SECRET` is set:
+`Authorization: Bearer SECRET`, or `X-Token: SECRET`, or `?token=SECRET`. The answer lists which triggers fired.
+
+```json
+{"type": "gift", "user": "Budi", "gift": "Rose", "count": 3, "diamonds": 1, "id": "msg-123"}
+{"type": "like", "user": "Ani", "count": 25}
+{"type": "comment", "user": "Cici", "text": "merah!"}
+{"type": "follow" | "share" | "join" | "subscribe", "user": "Dodi"}
+{"type": "custom", "gift": "my-event", "user": "x"}
+```
+
+* `side` (`"A"`/`"B"`) says which kingdom the viewer supports, when the connector knows it.
+* `id` makes retries safe: the same id is ignored the second time.
+* TikTok-style names are accepted as they are: `uniqueId`/`nickname` (user), `giftName`, `repeatCount`
+  (count), `diamondCount`, `comment`, `msgId`.
+* Gift names ignore case, spaces, `_` and `-` (`Finger Heart` = `finger_heart`). `gift_aliases` maps
+  local names (`"mawar": "rose"`).
+
+Other endpoints: `GET /state`, `GET /hooks`, `GET /overlay`, `GET /health`, `POST /hooks`, `POST /overlay`,
+`POST /control`, `POST /command` (any story/camera step). `r3dsims send|hook|overlay|control|state|step`
+wrap them (`--server http://host:8787`, `--token`, or `R3D_SERVER` / `R3D_TOKEN`).
+
+## war.json
+
+```json
+{
+  "title": "PERANG KERAJAAN",
+  "scene": "scene.json",
+  "castle_hp": 1000,
+  "match": {"mode": "rounds", "rounds": 3, "round_secs": 90, "lobby_secs": 5, "intermission": 7, "restart_secs": 20},
+  "sides":  {"A": {"name": "MERAH", "color": "#e0453a", "castle": "castle_a", "spawn": [12.5, 12], "unit": "knight",
+                   "facing": 90, "castle_radius": 3.0, "zone": [4, 4, 25, 20]},
+             "B": { ... }},
+  "units":  {"knight": {"asset": "knight", "hp": 45, "speed": 2.0, "dmg": 7, "range": 1.2, "cooldown": 0.9}, ...},
+  "actions":  { "meteor": {"type": "meteor", "count": 1, "radius": 3.2, "damage": 150, "castle_damage": 110}, ... },
+  "triggers": [ {"name": "rose", "on": "gift:rose", "side": "A", "do": "meteor", "label": "ROSE = METEOR MERAH", "icon": ":rose:"} ],
+  "macros": { ... }, "bots": [ ... ], "gift_aliases": { ... }, "overlay": [ ... ]
+}
+```
+
+### Rounds or endless, and the winner
+
+* `"mode": "rounds"`: best of `rounds` (first to a majority ends it). A round ends when a castle falls
+  (the other side wins) or at `round_secs` (the castle with more HP wins, equal = draw). After the last
+  round the **match winner** is the side with more round wins, then more castle HP summed over the
+  rounds, otherwise a draw. `restart_secs` (default 15) starts a new match by itself; `null` waits for
+  `r3dsims control start`.
+* `"mode": "endless"`: a winner after every round, round after round, until `r3dsims control stop`
+  (then the match winner is decided like above).
+* `control`: `start`, `next_round` (end this round now), `reset`, `stop`, `pause`, `resume`, `biome:NAME`.
+
+### Nobody is watching: the autopilot
+
+The stream never sits still. The lobby starts the first round by itself, rounds end by themselves, a new
+match or round follows by itself, and when no webhook event arrived for `autopilot.idle_secs` (default 6) an
+**autopilot** plays moves at random intervals: reinforcements, speeches, meteors, whatever you list. The HUD shows
+a hint line while it plays, and the first real event hands control straight back.
+
+```json
+"autopilot": {"idle_secs": 6, "interval": [2.5, 6.0], "actions": [
+  {"weight": 4, "do": "reinforce", "side": "random"},
+  {"weight": 1, "do": "meteor", "side": "leader"}]}
+```
+
+Without `actions` it reinforces a random side, or fires any named action on a random side. `"autopilot": null`
+turns it off. Macro bots (below) are for behaviour you script yourself.
+
+### Soldiers
+
+Each side's soldiers march toward the enemy objective (`castle`; `base` and `objective` are accepted names), fight the
+nearest enemy in range, attack the objective when they reach it. Clips used from the unit's asset: `idle`, `walk`,
+`attack`, `cheer` (speeches) and the `defeat_anim` (default `die`; the demo uses `faint`, nobody is hurt in a
+parody). `ranged` units shoot (cosmetic arrows). `structure: true` units (barricades) never move or attack and are
+not counted as soldiers: the other side tears them down. Autospawn (`autospawn.every`) keeps a trickle of
+reinforcements; `max_units` caps a side.
+
+### Actions: what a trigger can do
+
+`side` is where the effect lands: the victim for meteor/arrows/lightning/quake, the beneficiary for the rest.
+
+| type | fields |
+| --- | --- |
+| `meteor` | `count`, `radius`, `damage`, `castle_damage`, `gap`, `target` (`auto` `castle` `field` `units` `front`), `friendly_fire`, `scale`, `asset` (what falls, e.g. a bottle), `burn_secs` / `burn_dps` / `burn_asset` (leaves a burning patch) |
+| `arrows` | `count`, `radius`, `damage`, `castle_damage`, `target` |
+| `lightning` | `count`, `damage`, `castle_damage` |
+| `spawn` | `unit` (empty = the side's default), `count`, `at` (`spawn`, `front`, `center`) |
+| `heal` | `amount` (castle HP; negative costs HP), `asset` (the little effect that floats up: `nasi`, `uang`...) |
+| `shield` | `secs` (castle takes no damage) |
+| `boost` | `secs`, `speed`, `damage` (soldiers of the side) |
+| `chant` | speech bubbles and a cheer: `texts`, `count`, `secs`, `anim`, `boost_secs` (rally) |
+| `push` | shove the side's soldiers away from a point (water cannon): `strength`, `radius`, `damage`, `target` |
+| `cloud` | lingering gas / smoke / fire: `radius`, `secs`, `slow` (speed multiplier), `dps`, `lethal`, `asset`, `target` |
+| `convert` | soldiers near a point change sides (bribes, defections): `count`, `radius`, `target` |
+| `sabotage` | strips shield and boost, slows (`slow_secs`, `slow`), tears down structures |
+| `quake` | `damage` (every soldier of the side), `castle_damage` |
+| `biome` | `name`: a key of `biomes`, or `random` |
+| `cinematic` | first-person camera for an ultimate (see below) |
+| `step` | `step`: any story/camera step, e.g. `{"op":"orbit","dyaw":90,"secs":2}` |
+| `overlay` | `add`, `remove`, `clear` (see Overlay) |
+| `announce` | `text`, `secs`, `color` (big banner) |
+| `seq` | `actions`: a list of names or inline actions |
+| `macro` | `name` |
+
+Name them under `actions` and use the name, or write the action inline in the trigger's `do`.
+
+### Camera effects: ultimates only
+
+Ordinary skills never move the camera. An **ultimate** is a macro that includes a `cinematic` action: the camera swoops
+from the broadcast view into the eyes of a soldier in one camp (`pov`: `enemy`, the side opposite the action's side, by
+default; `self`, `A`, `B`), stays for `secs`, and swoops back. What the viewer sees depends on the parameters you
+give each ultimate:
+
+| field | effect |
+| --- | --- |
+| `look` | `enemy` straight ahead (default), `sky` looking up (meteors, lightning), `castle` at the enemy objective; `pitch` overrides |
+| `fov`, `bob` | wide or tight lens, head bob while the soldier walks |
+| `shake` | camera shake (an earthquake feel) |
+| `tint`, `vignette` | a colour wash (`#rrggbbaa`) and darkened edges: blue for a tsunami, orange for fire, yellow for a crowd |
+| `flashes` | white lightning flashes per second |
+| `unit` | `front` (a soldier near the enemy line, default), `random`, `castle` (stand at the gate) |
+
+The `perang` template has three: `galaxy` (meteor apocalypse, looks up, orange), `whale` (a tsunami pushing the whole
+enemy line back, blue, wide lens), `universe` (a lightning storm, flashes). The `demo` template has `galaxy` (the
+crackdown seen through a policeman's eyes) and `whale` (a thousand people marching, seen from inside the crowd).
+
+### Biomes
+
+A biome re-skins the world while the war goes on: it recolours terrain tiles (by legend key), sets the sky, swaps scenery
+by entity-id prefix, scales soldier speed and can run a hazard by itself.
+
+```json
+"biome": "siang",
+"biome_rotation": {"every": "round", "list": ["siang", "malam"]},
+"biomes": {
+  "malam": {"name": "MALAM", "sky": "night", "speed": 0.95,
+            "terrain": {"p": {"top": "#8e8aa6:stone", "side": "#625f7a:stone"}},
+            "props": [{"prefix": "tree_", "asset": "pine"}],
+            "hazard": {"every": 16, "do": {"type": "meteor", "count": 2, "target": "field"}, "side": "random"}}
+}
+```
+
+Skies: `day`, `dawn`, `sunset`, `night`, `desert`, `snow`, `lava`. Switch by hand with `r3dsims biome NAME`, by gift with
+the `biome` action, or let `biome_rotation` do it every round (`every: "round"`) or every N seconds (`every: "secs"`,
+`secs`; `random: true` shuffles). `perang` has grass, desert, snow and lava (eruptions); `demo` has day, dusk and night
+(street lamps and windows glow).
+
+### The two templates
+
+| | `perang` | `demo` |
+| --- | --- | --- |
+| sides | MERAH / BIRU kingdoms, castles | RAKYAT (citizens, stage) / PEMERINTAH (police, government building) |
+| mode | 3 rounds, best of | endless, day and night rotation |
+| units | knight, archer, giant | warga, mahasiswa, polisi, barikade (structure); nobody dies, they faint |
+| gifts | meteor, lightning, arrows, reinforcements, shield, ultimates | orasi (morale), nasi bungkus (heal), molotov, barricade, foreign aid or corruption (government heal), water cannon, tear gas, intelligence (sabotage), rice-pack bribes (defection), ultimates |
+
+Everything in both is data: copy a template and change names, assets, gifts and numbers; the engine does not care
+whether the objective is a castle or a parliament.
+
+### Triggers
+
+`{"name", "on", "side", "do" | "macro", ...}`. `on` is one pattern or a list: `gift:rose`, `gift:*`,
+`like`, `comment:~word` (contains), `comment:*`, `follow`, `share`, `join`, `subscribe`, `custom:NAME`.
+`side`: `A`, `B`, `event` (the event's own `side`, else random), `random`, `leader`, `trailing` (the
+side with less castle HP, to help the underdog). More fields: `min_count`, `min_diamonds`, `per_count`
+(repeat once per gift count, capped by `max_repeat`), `cooldown`, `announce` / `label` / `icon` (ticker
+line and the on-screen gift menu), `legend` (hide from the menu), `overlay` (elements popped on trigger,
+`{user}` `{gift}` `{count}` `{side}` are replaced), `stop`.
+
+Events are only acted on while a round is being fought; during the lobby and between rounds they are
+reported as `ignored`.
+
+### Macros and bots (scripts)
+
+A macro is a list of steps: `act` (action + side), `event` (feed a synthetic event through the
+triggers), `wait`, `repeat`, `forever`, `random` (weighted `choices`), `if` / `until` (conditions),
+`announce`, `overlay`, `step` (camera), `call` (another macro), `set` / `add` (numeric variables), `stop`.
+Conditions: `hp_pct_lt` / `hp_pct_gt` (`{"side","value"}`), `units_lt` / `units_gt`, `round`, `round_gte`,
+`phase`, `leading`, `idle_secs_gt`, `round_secs_gt`, `var` (`name` + `gte`/`lte`/`eq`), `chance`, `not`,
+`all`, `any`.
+
+A trigger runs a macro with the event as context (`{user}` works inside it). A **bot** runs a macro by
+itself: `{"name": "autoplay", "macro": "fill", "when_idle": 8}` (nobody sent anything for 8 s) or
+`"every": 14`, optionally with `"when": <condition>`. The template's bots keep the field alive and
+shield a castle that is about to fall.
+
+### Publish webhook functions while live
+
+An agent changes behaviour without a restart:
+
+```
+r3dsims hook publish my-hooks.json
+r3dsims hook list
+r3dsims hook remove galaxy
+```
+
+```json
+{"actions":  {"mega": {"type": "meteor", "count": 12, "target": "front"}},
+ "triggers": [{"name": "universe", "on": "gift:universe", "side": "A", "do": "mega",
+               "label": "UNIVERSE = KIAMAT MERAH", "icon": ":boom:", "cooldown": 10}],
+ "macros":   {"fireworks": [{"do": "repeat", "times": 5, "steps": [{"do": "act", "action": "arrow_rain", "side": "random"}, {"do": "wait", "secs": 0.5}]}]},
+ "remove":   ["rose"], "replace": false}
+```
+
+Entries with an existing name are replaced, new ones added. The whole publication is validated first
+(unknown action, macro, unit, bad side...): on error **nothing** changes and every problem is listed.
+`"replace": true` first drops the triggers/actions/macros/bots of the kinds you send.
+
+## Overlay: text, emoji, SVG, PNG, bars
+
+Anything on screen besides the diorama is an overlay element. The built-in war HUD is made of the same
+elements, and `"hud": false` turns it off so you can draw your own.
+
+```
+r3dsims overlay add '{"id":"promo","type":"text","text":"FOLLOW FOR :fire: BATTLES","at":[0.5,0.95],"anchor":"bottom","size":0.035,"bg":"#000000aa"}'
+r3dsims overlay add '{"type":"emoji","emoji":"🌹","size":0.18,"at":[0.5,0.45],"ttl":2,"anim_in":"pop"}'
+r3dsims overlay add logo.json            # a file: SVG elements, bars, anything
+r3dsims overlay patch promo '{"text":"ROUND {round}: {name.A} VS {name.B}"}'
+r3dsims overlay remove promo
+r3dsims overlay list
+r3dsims overlay emoji                    # the built-in emoji and their :short: names
+```
+
+Units: `at` is a fraction of the frame; every length (`size`, `w`, `h`, `pad`, `offset`) is a fraction of the
+**shorter** frame side, so a layout survives a change from 1280x720 to 720x1280.
+
+| `type` | fields |
+| --- | --- |
+| `text` | `text`, `size`, `color`, `shadow`, `outline`, `bg`, `pad`, `align`, `max_width` |
+| `emoji` | `emoji` (a character or `:name:`), `size` |
+| `svg` | `src` (file) or `svg` (inline markup), `w`, `h` |
+| `image` | `src` (PNG, or an SVG by extension), `w`, `h` |
+| `rect` | `w`, `h`, `color`, `radius`, `border`, `border_w`; `full: true` covers the whole frame (tints, flashes) |
+| `vignette` | `color`, `strength` (darkened edges over the whole frame) |
+| `bar` | `w`, `h`, `value` or `bind` (a live variable such as `hp_frac.A`), `color`, `bg`, `border`, `from_right` |
+
+Common: `id`, `at`, `anchor` (`center`, `top-left`, `top`, `bottom`...), `offset`, `opacity`, `z`, `ttl`,
+`anim_in` (`pop` `fade` `slide_up` `slide_down` `slide_left` `slide_right`), `anim_out`, `anim_secs`,
+`from` / `until` (seconds on the overlay clock), `visible`.
+
+* **Text** uses a built-in pixel font: A-Z (case-insensitive), 0-9 and `. , ! ? : - @ ' / + % ( ) = > < * # _ & | [ ]`.
+  Emoji, real characters or `:short:` names, are drawn inline. Other characters (accents, CJK) leave a gap.
+* **Emoji** come from a built-in set of about 55 vector emoji, so they work on a server without any
+  emoji font (`r3dsims overlay emoji`). For the full set put Twemoji/Noto SVGs named by code point
+  (`1f339.svg`, or `.png`) in a folder and pass `--emoji-dir DIR`. An unknown emoji shows a `?` tile.
+* **SVG** is rasterised at the exact size needed (resvg); `<text>` in an SVG needs a system font.
+* Live values for text (`{title}` `{round}` `{rounds}` `{time}` `{phase}` `{name.A}` `{hp.A}` `{hp_frac.A}`
+  `{units.A}` `{wins.A}` `{color.A}` `{ticker.1}`..`{ticker.5}` `{top1}`..`{top3}` `{banner}` `{var.NAME}`)
+  are replaced every frame, the colour fields too. Replace `A` by the side key you chose.
+* `r3dsims render scene.json -o out.mp4 --overlay overlay.json` uses the same elements on recorded videos.
+
+## Safety and limits
+
+* `--listen 127.0.0.1:8787` by default. To take webhooks from another machine listen on `0.0.0.0:PORT`
+  **with `--token`**, or keep it local and let the connector run next to it. There is no TLS: use a
+  reverse proxy for anything public.
+* Bodies over 1 MB are cut; one simulation thread owns the state, so requests are applied in order.
+* `max_units` caps soldiers per side; macros are capped (400 steps per tick, depth 24, 64 at a time).
+* The picture is rendered at the configured size on the server's GPU (Vulkan, Metal, DX12; lavapipe works
+  but slowly). The simulation steps at a fixed 1/fps, so a slow machine plays in slow motion instead of
+  skipping.

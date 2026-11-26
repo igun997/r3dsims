@@ -13,6 +13,7 @@ commands. `docs/FORMAT.md` in the repo is the format reference: read it before w
 | --- | --- |
 | install or build the tools, fix "no GPU adapter" | `r3dsims-install` |
 | make or edit a voxel model, animation, materials | `r3dsims-assets` |
+| run a webhook-driven live war stream: gifts to effects, hooks, overlay emoji/SVG | `r3dsims-live` |
 | terrain, dollhouse buildings, story steps, camera moves | `r3dsims-scenes` |
 | render a still / mp4 / gif for Instagram, TikTok, YouTube | `r3dsims-record` |
 
@@ -20,6 +21,8 @@ commands. `docs/FORMAT.md` in the repo is the format reference: read it before w
 
 1. `r3dsims template pelabuhan -o /tmp/p` (also `kampung` island village, `rumah` two-storey
    dollhouse). `pelabuhan` is the complex example: harbour, lighthouse, boats, 3-storey guesthouse.
+   `perang` and `demo` are for `r3dsims live` (see `r3dsims-live`): kingdoms at war, and a parody
+   street demonstration, driven by webhooks.
 2. Edit the JSON (`assets/*.json`, `scene.json`).
 3. `r3dsims validate scene.json`: loads everything, runs the story headless once, prints voxel
    counts, clip names, story duration and `[warn]` lines (unknown actor/anim/target, stairs without

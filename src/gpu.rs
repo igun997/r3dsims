@@ -407,7 +407,8 @@ impl SceneRenderer {
     /// Records every pass for one frame of `world` into `enc`.
     pub fn render(&mut self, world: &World, enc: &mut wgpu::CommandEncoder) {
         let aspect = self.w as f32 / self.h as f32;
-        let cam = world.rig.cam;
+        let mut cam = world.rig.cam;
+        cam.target += world.cam_shake;
         let pr = cam.proj(aspect);
         let sky = &world.sky;
         let l = sky.light_dir.normalize();

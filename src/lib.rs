@@ -15,6 +15,10 @@
 
 pub mod building;
 pub mod camera;
+pub mod client;
+pub mod demo;
+pub mod emoji;
+pub mod hud;
 pub mod font;
 pub mod gpu;
 pub mod harbor;
@@ -25,6 +29,11 @@ pub mod nav;
 pub mod record;
 pub mod story;
 pub mod templates;
+pub mod live;
+pub mod overlay;
+pub mod perang;
+pub mod script;
+pub mod war;
 pub mod terrain;
 pub mod texture;
 pub mod vox;
