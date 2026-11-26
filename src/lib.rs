@@ -25,6 +25,7 @@ pub mod hud;
 pub mod font;
 pub mod gpu;
 pub mod harbor;
+pub mod history;
 pub mod house;
 pub mod mesh;
 pub mod model;

@@ -194,6 +194,7 @@ fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
         out_h: 270,
         pixel: 2,
         clay: true,
+        history: Some(dir.join("sessions.jsonl")),
         fps: 20,
         mjpeg: true,
         quality: 70,
@@ -237,6 +238,23 @@ fn live_stream_takes_webhooks_publishes_hooks_and_serves_frames() {
     let (code, jpg) = anon.request_bytes("GET", "/frame.jpg", None).unwrap();
     assert_eq!(code, 200);
     assert!(jpg.len() > 1000 && jpg.starts_with(&[0xFF, 0xD8]), "frame.jpg is {} bytes, starts {:?}", jpg.len(), &jpg[..jpg.len().min(4)]);
+
+    // the test panel is a page of its own; /view stays the bare picture for a browser source
+    assert!(anon.get("/test").unwrap().contains("r3dsims test panel"));
+    assert!(anon.get("/view?panel=1").unwrap().contains("r3dsims test panel"));
+    assert!(!anon.get("/view").unwrap().contains("test panel"));
+    // a finished round is written to the history and counted in the session
+    me.post("/control", r#"{"op":"next_round"}"#).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    let hist: Value = serde_json::from_str(&anon.get("/history").unwrap()).unwrap();
+    assert_eq!(hist["enabled"], json!(true));
+    assert_eq!(hist["totals"]["rounds"], json!(1), "{hist}");
+    assert_eq!(hist["sessions"][0]["current"], json!(true));
+    assert_eq!(hist["sessions"][0]["rounds"], json!(1));
+    let state: Value = serde_json::from_str(&anon.get("/state").unwrap()).unwrap();
+    assert_eq!(state["session"]["rounds"], json!(1));
+    let wins: u64 = state["session"]["sides"].as_object().unwrap().values().map(|s| s["wins"].as_u64().unwrap()).sum();
+    assert_eq!(wins + state["session"]["draws"].as_u64().unwrap(), 1, "one round, one result: {state}");
 
     let st = runner.join().unwrap().unwrap();
     assert!(st["time"].as_f64().unwrap() >= 7.0);

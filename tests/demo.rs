@@ -115,6 +115,46 @@ fn healing_costs_nothing_but_sabotage_strips_a_boost() {
 }
 
 #[test]
+fn every_round_is_recorded_as_a_win_a_loss_or_a_draw_for_the_session() {
+    let (mut world, mut war) = load("session");
+    war.control(&mut world, "start").unwrap();
+    sim(&mut war, &mut world, 3.0);
+    // knock the government camp down, then end the round: RAKYAT wins
+    run(&mut war, &mut world, "gedung_dikepung", 1);
+    run(&mut war, &mut world, "gedung_dikepung", 1);
+    war.control(&mut world, "next_round").unwrap();
+    let log = war.take_log();
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert_eq!(log[0]["ev"], json!("round"));
+    assert_eq!(log[0]["winner"], json!("A"), "the camp with more health wins a forced round: {:?}", log[0]);
+    assert!(war.take_log().is_empty(), "the log is drained");
+    let st = war.state_json();
+    assert_eq!(st["session"]["rounds"], json!(1));
+    assert_eq!(st["session"]["sides"]["A"]["wins"], json!(1));
+    assert_eq!(st["session"]["sides"]["A"]["losses"], json!(0));
+    assert_eq!(st["session"]["sides"]["B"]["losses"], json!(1));
+    // the HUD can show both numbers
+    let vars = war.vars();
+    assert_eq!(vars["wins.A"], "1");
+    assert_eq!(vars["losses.B"], "1");
+    assert_eq!(vars["lbl.losses"], "KALAH");
+}
+
+#[test]
+fn the_run_control_plays_an_action_or_macro_for_testing() {
+    let (mut world, mut war) = load("runctl");
+    assert!(war.control(&mut world, "run:molotov:B").is_err(), "needs a round in progress");
+    war.control(&mut world, "start").unwrap();
+    sim(&mut war, &mut world, 3.0);
+    let hp0 = war.state_json()["sides"]["B"]["hp"].as_f64().unwrap();
+    war.control(&mut world, "run:gedung_dikepung:B").unwrap();
+    assert!(war.state_json()["sides"]["B"]["hp"].as_f64().unwrap() < hp0);
+    war.control(&mut world, "run:orasi_besar").unwrap();
+    assert!(war.control(&mut world, "run:nope").is_err());
+    assert!(war.control(&mut world, "run:massa:Z").is_err(), "unknown side");
+}
+
+#[test]
 fn only_ultimates_move_the_camera() {
     let (mut world, mut war) = load("camera");
     war.control(&mut world, "start").unwrap();

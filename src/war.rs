@@ -840,6 +840,18 @@ impl Phase {
     }
 }
 
+/// Results of this run of the stream ("session"): rounds won per side, draws, matches.
+#[derive(Default, Clone)]
+struct Session {
+    rounds: u32,
+    draws: u32,
+    wins: [u32; 2],
+    matches: u32,
+    match_draws: u32,
+    match_wins: [u32; 2],
+    started_unix: u64,
+}
+
 #[derive(Default, Clone)]
 struct SideState {
     hp: f32,
@@ -998,6 +1010,9 @@ pub struct War {
     paused: bool,
     match_winner: Option<Option<usize>>,
     last_round_winner: Option<Option<usize>>,
+    session: Session,
+    /// round / match results waiting to be written to the history file
+    log: Vec<Value>,
     auto_t: f32,
     bot_t: HashMap<String, f32>,
     pub events_seen: u64,
@@ -1067,6 +1082,8 @@ impl War {
             paused: false,
             match_winner: None,
             last_round_winner: None,
+            session: Session { started_unix: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0), ..Default::default() },
+            log: vec![],
             auto_t: 0.0,
             bot_t: HashMap::new(),
             events_seen: 0,
@@ -1152,8 +1169,8 @@ impl War {
             "match_win" => "{name} JUARA!",
             "match_draw" => "SERI! TIDAK ADA PEMENANG",
             "label_hp" => "HP",
-            "label_units" => "PASUKAN",
             "label_wins" => "MENANG",
+            "label_losses" => "KALAH",
             "label_round" => "BABAK",
             "hint" => "MODE OTOMATIS: KIRIM GIFT UNTUK IKUT CAMPUR!",
             _ => "",
@@ -2119,7 +2136,7 @@ impl War {
         v.insert("phase".into(), self.phase.name().into());
         v.insert("biome".into(), self.biome_label());
         v.insert("biome_key".into(), self.biome.clone().unwrap_or_default());
-        for k in ["label_hp", "label_units", "label_wins", "label_round"] {
+        for k in ["label_hp", "label_units", "label_wins", "label_losses", "label_round"] {
             v.insert(format!("lbl.{}", &k[6..]), self.text(k, &Vars::new()));
         }
         v.insert("hint".into(), if self.autopilot_active() { self.text("hint", &Vars::new()) } else { String::new() });
@@ -2131,6 +2148,7 @@ impl War {
             v.insert(format!("hp_frac.{k}"), format!("{:.4}", (self.sides[s].hp / self.def.castle_hp).clamp(0.0, 1.0)));
             v.insert(format!("units.{k}"), self.alive(s).to_string());
             v.insert(format!("wins.{k}"), self.sides[s].wins.to_string());
+            v.insert(format!("losses.{k}"), self.sides[1 - s].wins.to_string());
             v.insert(format!("shield.{k}"), if self.sides[s].shield > 0.0 { "SHIELD".into() } else { String::new() });
         }
         for i in 0..5 {
@@ -2194,8 +2212,22 @@ impl War {
         }
         if let Some(w) = winner {
             self.sides[w].wins += 1;
+            self.session.wins[w] += 1;
+        } else {
+            self.session.draws += 1;
         }
+        self.session.rounds += 1;
         self.last_round_winner = Some(winner);
+        let key = |i: usize| self.side_keys[i].clone();
+        self.log.push(json!({
+            "ev": "round",
+            "round": self.round,
+            "winner": winner.map(key),
+            "hp": { self.side_keys[0].clone(): self.sides[0].hp.ceil(), self.side_keys[1].clone(): self.sides[1].hp.ceil() },
+            "units": { self.side_keys[0].clone(): self.alive(0), self.side_keys[1].clone(): self.alive(1) },
+            "biome": self.biome,
+            "round_secs": (self.round_time * 10.0).round() / 10.0,
+        }));
         let mut vars = self.vars();
         let (text, color) = match winner {
             Some(w) => {
@@ -2226,6 +2258,12 @@ impl War {
             None
         };
         self.match_winner = Some(winner);
+        self.session.matches += 1;
+        match winner {
+            Some(w) => self.session.match_wins[w] += 1,
+            None => self.session.match_draws += 1,
+        }
+        self.log.push(json!({"ev": "match", "winner": winner.map(|i| self.side_keys[i].clone()), "rounds": self.round}));
         let mut vars = self.vars();
         let (text, color) = match winner {
             Some(w) => {
@@ -2288,8 +2326,30 @@ impl War {
             "stop" => self.stopped = true,
             "pause" => self.paused = true,
             "resume" => self.paused = false,
+            other if other.starts_with("run:") => {
+                // test helper: `run:NAME` or `run:NAME:SIDE` plays an action or a macro now
+                let mut parts = other[4..].splitn(2, ':');
+                let name = parts.next().unwrap_or_default().to_string();
+                let side = match parts.next() {
+                    Some(k) => self.side_keys.iter().position(|s| s.eq_ignore_ascii_case(k)).ok_or_else(|| anyhow!("unknown side '{k}'"))?,
+                    None => 0,
+                };
+                if !matches!(self.phase, Phase::Fighting) {
+                    bail!("run: needs a round in progress (phase is {})", self.phase.name());
+                }
+                if self.def.macros.contains_key(&name) {
+                    let steps = self.def.macros[&name].clone();
+                    let mut ctx = Ctx::default();
+                    ctx.side = Some(side);
+                    self.runners.push(Runner::new(&name, steps, ctx));
+                } else if self.def.actions.contains_key(&name) {
+                    self.exec(world, &ActionRef::Name(name), side, &Ctx::default());
+                } else {
+                    bail!("no action or macro named '{name}'");
+                }
+            }
             other if other.starts_with("biome:") => self.set_biome(world, &other[6..])?,
-            other => bail!("unknown control '{other}' (start, next_round, reset, stop, pause, resume, biome:NAME)"),
+            other => bail!("unknown control '{other}' (start, next_round, reset, stop, pause, resume, biome:NAME, run:NAME[:SIDE])"),
         }
         Ok(json!({"phase": self.phase.name(), "round": self.round, "paused": self.paused}))
     }
@@ -2870,6 +2930,29 @@ impl War {
         self.def.hud
     }
 
+    /// Round and match results since the last call, for the history file.
+    pub fn take_log(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.log)
+    }
+
+    /// Wins, losses and draws of this run of the stream.
+    pub fn session_json(&self) -> Value {
+        let s = &self.session;
+        let (ka, kb) = (self.side_keys[0].clone(), self.side_keys[1].clone());
+        json!({
+            "started_unix": s.started_unix,
+            "secs": self.time.round(),
+            "rounds": s.rounds,
+            "draws": s.draws,
+            "matches": s.matches,
+            "match_draws": s.match_draws,
+            "sides": {
+                ka.clone(): {"name": self.side_name(0), "wins": s.wins[0], "losses": s.wins[1], "match_wins": s.match_wins[0]},
+                kb.clone(): {"name": self.side_name(1), "wins": s.wins[1], "losses": s.wins[0], "match_wins": s.match_wins[1]},
+            },
+        })
+    }
+
     pub fn state_json(&self) -> Value {
         let side = |s: usize| {
             json!({
@@ -2910,6 +2993,7 @@ impl War {
             "overlay_elements": self.overlay.list().iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
             "ticker": self.ticker.iter().map(|t| t.text.clone()).collect::<Vec<_>>(),
             "top": top.iter().take(5).map(|(u, p)| json!({"user": u, "points": p})).collect::<Vec<_>>(),
+            "session": self.session_json(),
         })
     }
 
@@ -2922,6 +3006,7 @@ impl War {
             "bots": self.def.bots,
             "units": self.def.units,
             "gift_aliases": self.def.gift_aliases,
+            "biomes": self.def.biomes.keys().collect::<Vec<_>>(),
         })
     }
 

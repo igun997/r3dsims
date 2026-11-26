@@ -26,7 +26,13 @@ r3dsims validate demo/war.json          # checks every reference, plays a whole 
 r3dsims live demo/war.json --log-events # http://127.0.0.1:8787/view shows the stream
 r3dsims send gift Rose --user Budi      # what the connector does; in `demo`, ROSE = a speech (morale up)
 r3dsims state                           # round, support, winner, biome, macros, top supporters
+r3dsims history                         # wins and losses of every session
 ```
+
+No typing needed to try it: open **`http://127.0.0.1:8787/test`** (or `/view?panel=1`). The picture on the left, on the right
+buttons for every gift of the war, like / follow / share / join / comment, a "run any action or macro" box, match
+controls (start, pause, next round, reset), biome buttons, a random-viewer simulator, the score of this session and the history
+table. If `live` runs with `--token`, open `/test?token=SECRET`. `/view` stays the bare picture, so it is safe as a browser source.
 
 Picture out:
 
@@ -71,9 +77,20 @@ For a portrait (TikTok) stream send a camera command once: `r3dsims step '{"op":
 * Gift names ignore case, spaces, `_` and `-` (`Finger Heart` = `finger_heart`). `gift_aliases` maps
   local names (`"mawar": "rose"`).
 
-Other endpoints: `GET /state`, `GET /hooks`, `GET /overlay`, `GET /health`, `POST /hooks`, `POST /overlay`,
-`POST /control`, `POST /command` (any story/camera step). `r3dsims send|hook|overlay|control|state|step`
-wrap them (`--server http://host:8787`, `--token`, or `R3D_SERVER` / `R3D_TOKEN`).
+Other endpoints: `GET /state`, `GET /hooks`, `GET /overlay`, `GET /history`, `GET /health`, `GET /test` (the test panel),
+`POST /hooks`, `POST /overlay`, `POST /control`, `POST /command` (any story/camera step). `r3dsims
+send|hook|overlay|control|state|history|step` wrap them (`--server http://host:8787`, `--token`, or `R3D_SERVER` /
+`R3D_TOKEN`).
+
+### Wins and losses per session
+
+A session is one run of `r3dsims live`. Every finished round (and match) is appended to a JSON-lines file, by default
+`sessions.jsonl` next to `war.json` (`--history FILE` to move it, `--no-history` for none), so the record survives
+restarts and crashes (a heartbeat every 30 s keeps the duration of a killed session). Per side: rounds won and rounds
+lost (the other side's wins); draws are counted apart; the session goes to the side with more round wins.
+`r3dsims history` prints the table, `GET /history` returns `{sessions, totals}` (totals per side name across all sessions:
+rounds won/lost, sessions won/lost). `GET /state` has `session` for the running one. The HUD shows `MENANG` and `KALAH` per
+side (labels `label_wins` / `label_losses` in `texts`).
 
 ## war.json
 
@@ -102,7 +119,8 @@ wrap them (`--server http://host:8787`, `--token`, or `R3D_SERVER` / `R3D_TOKEN`
   `r3dsims control start`.
 * `"mode": "endless"`: a winner after every round, round after round, until `r3dsims control stop`
   (then the match winner is decided like above).
-* `control`: `start`, `next_round` (end this round now), `reset`, `stop`, `pause`, `resume`, `biome:NAME`.
+* `control`: `start`, `next_round` (end this round now), `reset`, `stop`, `pause`, `resume`, `biome:NAME`, and `run:NAME[:SIDE]`
+  (play any action or macro right now, e.g. `run:aksi_massa:B`, for testing; needs a round in progress).
 
 ### Nobody is watching: the autopilot
 

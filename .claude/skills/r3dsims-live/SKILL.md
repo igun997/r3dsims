@@ -27,7 +27,9 @@ Look: clay by default (`--style clay`, smooth hand-made figures, soft light, no 
 | --- | --- |
 | simulate what the connector sends | `r3dsims send gift Rose --user Budi --count 3` · `send like 30` · `send comment "rakyat"` · `send --json '{...}'` |
 | see the match | `r3dsims state` (phase, round, support/HP, winner, biome, autopilot, cinematic, macros, top supporters) |
-| rounds | `r3dsims control start\|next_round\|reset\|stop\|pause\|resume` |
+| try it without typing | open `http://HOST:8787/test` (buttons for gifts, events, controls, biomes, run any macro, viewer simulator, score + history) |
+| wins and losses | `r3dsims history` (every session, from `sessions.jsonl`; `--history FILE`, `--no-history`); `state.session` for the running one |
+| rounds | `r3dsims control start\|next_round\|reset\|stop\|pause\|resume\|biome:NAME\|run:NAME[:SIDE]` |
 | world theme | `r3dsims biome malam` (any key of `biomes`, or `random`) |
 | camera | `r3dsims step '{"op":"orbit","dyaw":90,"secs":2}'` |
 | publish webhook functions | `r3dsims hook publish file.json` · `hook list` · `hook remove NAME` |

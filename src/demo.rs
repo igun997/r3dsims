@@ -501,7 +501,7 @@ pub fn war_json() -> Value {
         "max_units": 40,
         "texts": {
             "round": "HARI KE-{round}", "round_win": "{name} MENANG HARI INI!", "match_win": "{name} JUARA!", "draw": "SERI, SAMA-SAMA CAPEK",
-            "match_draw": "SERI", "label_hp": "DUKUNGAN", "label_units": "MASSA", "label_wins": "MENANG", "label_round": "HARI",
+            "match_draw": "SERI", "label_hp": "DUKUNGAN", "label_units": "MASSA", "label_wins": "MENANG", "label_losses": "KALAH", "label_round": "HARI",
             "hint": "MODE OTOMATIS: KIRIM GIFT BIAR RAMAI!"
         },
         "sides": {

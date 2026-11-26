@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::gpu::{Gpu, SceneRenderer};
+use crate::history::History;
 use crate::hud;
 use crate::overlay::{Compositor, Drawable};
 use crate::record::{ffmpeg_available, upscale_nearest};
@@ -35,6 +36,8 @@ pub struct LiveOpts {
     pub pixel: u32,
     /// clay style (smooth hand-made figures) instead of voxel cubes
     pub clay: bool,
+    /// append results of every round to this JSON-lines file (None = no history)
+    pub history: Option<PathBuf>,
     pub fps: u32,
     pub mjpeg: bool,
     pub quality: u8,
@@ -168,6 +171,7 @@ struct Shared {
     hooks: Mutex<Value>,
     overlay: Mutex<Value>,
     token: Option<String>,
+    history: Option<Arc<History>>,
     tx: Mutex<Sender<Req>>,
 }
 
@@ -194,6 +198,9 @@ POST /command   any story/camera step, e.g. {\"op\":\"orbit\",\"dyaw\":90,\"secs
 auth: Authorization: Bearer TOKEN | X-Token: TOKEN | ?token=TOKEN (when --token is set)</pre>";
 
 const VIEW: &str = "<!doctype html><meta charset=utf-8><title>r3dsims</title><style>html,body{margin:0;height:100%;background:#000}img{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}</style><img src=/stream.mjpg>";
+
+/// The test panel: the picture plus buttons for gifts, comments, controls, biomes and the history.
+const PANEL: &str = include_str!("panel.html");
 
 fn authorised(req: &Request, sh: &Shared, query: &str) -> bool {
     let Some(tok) = sh.token.as_deref() else { return true };
@@ -238,7 +245,13 @@ fn handle(mut req: Request, sh: Arc<Shared>) {
     let method = req.method().clone();
     let resp = match (&method, path) {
         (Method::Get, "/") => text_response(200, "text/html; charset=utf-8", INDEX.into()),
+        (Method::Get, "/view") if query.split('&').any(|q| q == "panel" || q == "test" || q.starts_with("panel=") || q.starts_with("test=")) => text_response(200, "text/html; charset=utf-8", PANEL.into()),
         (Method::Get, "/view") => text_response(200, "text/html; charset=utf-8", VIEW.into()),
+        (Method::Get, "/test" | "/panel") => text_response(200, "text/html; charset=utf-8", PANEL.into()),
+        (Method::Get, "/history") => match &sh.history {
+            Some(h) => json_response(200, &h.summary()),
+            None => json_response(200, &json!({"enabled": false, "sessions": [], "totals": {}})),
+        },
         (Method::Get, "/health") => text_response(200, "text/plain", "ok".into()),
         (Method::Get, "/state") => json_response(200, &sh.state.lock().map(|v| v.clone()).unwrap_or(Value::Null)),
         (Method::Get, "/hooks") => json_response(200, &sh.hooks.lock().map(|v| v.clone()).unwrap_or(Value::Null)),
@@ -389,6 +402,7 @@ pub struct Live {
     rx: Receiver<Req>,
     addr: SocketAddr,
     base_dir: PathBuf,
+    history: Option<Arc<History>>,
 }
 
 impl Live {
@@ -396,6 +410,12 @@ impl Live {
     pub fn start(opts: LiveOpts) -> Result<Live> {
         let (mut world, war) = War::load(&opts.war)?;
         world.clay = opts.clay;
+        let history = opts.history.clone().map(|p| {
+            let st = war.state_json();
+            let sides: Vec<(String, String)> = st["sides"].as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v["name"].as_str().unwrap_or(k).to_string())).collect()).unwrap_or_default();
+            let pair = [sides.first().cloned().unwrap_or_default(), sides.get(1).cloned().unwrap_or_default()];
+            Arc::new(History::open(p, st["title"].as_str().unwrap_or(""), pair))
+        });
         let base_dir = opts.war.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let server = Server::http(&opts.listen).map_err(|e| anyhow!("listen on {}: {e}", opts.listen))?;
         let addr = server.server_addr().to_ip().ok_or_else(|| anyhow!("server has no IP address"))?;
@@ -406,6 +426,7 @@ impl Live {
             hooks: Mutex::new(war.hooks_json()),
             overlay: Mutex::new(json!([])),
             token: opts.token.clone().filter(|t| !t.is_empty()),
+            history: history.clone(),
             tx: Mutex::new(tx),
         });
         let sh = shared.clone();
@@ -415,7 +436,7 @@ impl Live {
                 std::thread::spawn(move || handle(req, sh));
             }
         });
-        Ok(Live { opts, world, war, shared, rx, addr, base_dir })
+        Ok(Live { opts, world, war, shared, rx, addr, base_dir, history })
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -482,7 +503,7 @@ impl Live {
         let base_dt = 1.0 / fps as f32;
         let frame_len = Duration::from_secs_f32(base_dt);
         eprintln!(
-            "live: {}x{} (render {}x{}) @ {} fps, listening on http://{}  [view: /view, webhook: POST /webhook]",
+            "live: {}x{} (render {}x{}) @ {} fps, listening on http://{}  [view: /view, test panel: /test, webhook: POST /webhook]",
             ow, oh, rw, rh, fps, self.addr
         );
         let started = Instant::now();
@@ -495,6 +516,7 @@ impl Live {
         let mut stats_since = Instant::now();
         let mut perf = json!({"fps": fps, "ms": {}});
         let mut slow_warned = Instant::now() - Duration::from_secs(60);
+        let mut heartbeat = Instant::now();
         loop {
             let frame_start = Instant::now();
             // Paced live: the world follows the wall clock, so a slow machine drops frames instead of
@@ -506,6 +528,17 @@ impl Live {
                 let _ = req.reply.send(v);
             }
             self.war.update(dt, &mut self.world);
+            for ev in self.war.take_log() {
+                if let Some(h) = &self.history {
+                    h.append(ev);
+                }
+            }
+            if self.history.is_some() && heartbeat.elapsed() >= Duration::from_secs(30) {
+                heartbeat = Instant::now();
+                if let Some(h) = &self.history {
+                    h.append(json!({"ev": "hb"}));
+                }
+            }
             self.world.update(dt);
             sim += dt;
 

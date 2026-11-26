@@ -67,6 +67,14 @@ enum Cmd {
         #[command(flatten)]
         conn: Conn,
     },
+    /// Wins and losses of every session (run of `live`) and the totals per side.
+    History {
+        /// print the raw JSON
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        conn: Conn,
+    },
     /// Run a story/camera step on a running `live`, e.g. '{"op":"orbit","dyaw":90,"secs":2}'.
     Step {
         json: String,
@@ -238,6 +246,12 @@ struct LiveArgs {
     /// Directory with <key>.svg / <key>.png for emoji outside the built-in set
     #[arg(long)]
     emoji_dir: Option<PathBuf>,
+    /// append every round result to this JSON-lines file (default: sessions.jsonl next to war.json)
+    #[arg(long)]
+    history: Option<PathBuf>,
+    /// keep no history file
+    #[arg(long)]
+    no_history: bool,
     /// stop after this many seconds (tests)
     #[arg(long)]
     seconds: Option<f32>,
@@ -585,6 +599,66 @@ fn cmd_send(a: SendArgs) -> Result<()> {
     show(&client, "POST", "/webhook", Some(&body))
 }
 
+/// `YYYY-MM-DD HH:MM` (UTC) of a unix time.
+fn utc(t: u64) -> String {
+    let (days, rem) = ((t / 86400) as i64, t % 86400);
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", rem / 3600, rem % 3600 / 60)
+}
+
+fn cmd_history(client: &Client, raw: bool) -> Result<()> {
+    let body = client.get("/history")?;
+    if raw {
+        println!("{body}");
+        return Ok(());
+    }
+    let v: Value = serde_json::from_str(&body).context("history is not JSON")?;
+    if v["enabled"] == json!(false) {
+        println!("no history file: `live` was started with --no-history");
+        return Ok(());
+    }
+    let sessions = v["sessions"].as_array().cloned().unwrap_or_default();
+    println!("history file: {}", v["file"].as_str().unwrap_or("?"));
+    for s in &sessions {
+        let mins = s["secs"].as_u64().unwrap_or(0) / 60;
+        let sides: Vec<String> = s["sides"]
+            .as_object()
+            .map(|o| o.values().map(|x| format!("{} {} menang {} kalah", x["name"].as_str().unwrap_or("?"), x["wins"], x["losses"])).collect())
+            .unwrap_or_default();
+        let result = match s["result"].as_str() {
+            Some("draw") => "seri".to_string(),
+            Some(k) => format!("unggul {}", s["sides"][k]["name"].as_str().unwrap_or(k)),
+            None => "belum ada babak".to_string(),
+        };
+        println!(
+            "{} {} UTC  {:>4} mnt  {} babak, {} seri | {} | {}{}",
+            if s["current"] == json!(true) { ">" } else { " " },
+            utc(s["started_unix"].as_u64().unwrap_or(0)),
+            mins,
+            s["rounds"],
+            s["draws"],
+            sides.join(" | "),
+            result,
+            s["title"].as_str().map(|t| format!("  [{t}]")).unwrap_or_default()
+        );
+    }
+    println!("TOTAL {} sesi, {} babak, {} seri", v["totals"]["sessions"], v["totals"]["rounds"], v["totals"]["draws"]);
+    if let Some(o) = v["totals"]["by_side"].as_object() {
+        for (name, t) in o {
+            println!("  {name}: {} menang, {} kalah babak; sesi menang {}, kalah {}", t["wins"], t["losses"], t["sessions_won"], t["sessions_lost"]);
+        }
+    }
+    Ok(())
+}
+
 fn cmd_live(a: LiveArgs) -> Result<()> {
     let (out_w, out_h) = match (&a.size, a.preset.as_str()) {
         (Some(s), _) => {
@@ -595,6 +669,7 @@ fn cmd_live(a: LiveArgs) -> Result<()> {
         (None, "live") => (720, 1280),
         (None, p) => preset_size(p).with_context(|| format!("unknown preset '{p}'"))?,
     };
+    let history = if a.no_history { None } else { Some(a.history.clone().unwrap_or_else(|| a.war.parent().map(|p| p.join("sessions.jsonl")).unwrap_or_else(|| PathBuf::from("sessions.jsonl")))) };
     let live = Live::start(LiveOpts {
         war: a.war,
         listen: a.listen,
@@ -603,6 +678,7 @@ fn cmd_live(a: LiveArgs) -> Result<()> {
         out_h,
         pixel: a.pixel,
         clay: parse_style(&a.style)?,
+        history,
         fps: a.fps,
         mjpeg: !a.no_mjpeg,
         quality: a.quality,
@@ -672,6 +748,7 @@ fn main() -> Result<()> {
         },
         Cmd::Control { op, conn } => show(&conn.client()?, "POST", "/control", Some(&json!({"op": op}).to_string())),
         Cmd::State { conn } => show(&conn.client()?, "GET", "/state", None),
+        Cmd::History { json, conn } => cmd_history(&conn.client()?, json),
         Cmd::Biome { name, conn } => show(&conn.client()?, "POST", "/control", Some(&json!({"op": format!("biome:{name}")}).to_string())),
         Cmd::Step { json: j, conn } => show(&conn.client()?, "POST", "/command", Some(&read_source(&j)?)),
     }

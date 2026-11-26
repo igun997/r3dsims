@@ -82,7 +82,7 @@ pub fn build(war: &War, w: usize, h: usize) -> Vec<HudItem> {
         .id(&format!("hud.bar.{key}"));
         bar.z = 1;
         out.push((bar, 1e3, None));
-        let mut label = text(&format!("{{name.{key}}}{sep}{{lbl.hp}} {{hp.{key}}}   {{lbl.units}} {{units.{key}}}   {{lbl.wins}} {{wins.{key}}}  {{shield.{key}}}"), ls, &lighten(&color(key))).at(x, y + (bar_h * short + 3.0) / h as f32, anchor).id(&format!("hud.label.{key}"));
+        let mut label = text(&format!("{{name.{key}}}{sep}{{lbl.hp}} {{hp.{key}}}   {{lbl.units}} {{units.{key}}}{sep}{{lbl.wins}} {{wins.{key}}}   {{lbl.losses}} {{losses.{key}}}  {{shield.{key}}}"), ls, &lighten(&color(key))).at(x, y + (bar_h * short + 3.0) / h as f32, anchor).id(&format!("hud.label.{key}"));
         if let Kind::Text { align, .. } = &mut label.kind {
             *align = if right { "right".into() } else { "left".into() };
         }
