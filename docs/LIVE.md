@@ -252,13 +252,41 @@ r3dsims vars '{"set":{"lv1":3,"x1":0.62},"add":{"visits":1},"text":{"nama1":"Al-
 
 * `set` and `add` change counters (numbers), `text` sets texts (cut at 200 characters). Names are 1-64 characters of
   letters, digits, `_ . -`. The whole body is checked first: one bad entry changes nothing. At most 512 of each.
-* Show them anywhere text is drawn with `{var.NAME}` and `{text.NAME}`; a bar can `bind` to `var.NAME` (3 decimals kept).
+* Show them anywhere text is drawn with `{var.NAME}` and `{text.NAME}`; a bar can `bind` to `var.NAME` (3 decimals kept). Texts that
+  should exist before the first feed (so a placeholder never shows raw) go in `"texts": {"kota": "Jakarta"}` of the studio file; `reset`
+  brings them back.
 * `"watch": [{"var": "lv1", "macro": "naik"}]` runs a macro when that counter (or text) changes. A change is never lost: if
   the macro still runs, the watch waits for it to finish and then runs once with the newest value.
 * In a `step`, a string that is exactly `"={var.x1}"` becomes a number, so a fed value can place or size something:
   `{"do":"spawn","entity":{"id":"p1","asset":"gedung","pos":["={var.x1}","={var.z1}"],"scale":"={var.skala1}","label":"{text.nama1}"}}`.
 * `spawn` steps may use any asset of the scene; the actor ids a macro spawns are known to `validate`, so later steps may
   name them.
+
+### A vector stage instead of a 3D diorama (animated SVG, no GPU)
+
+A studio's `scene` may be a **stage**: a file with `layers` instead of terrain. The pictures are SVG, the movement is JSON, both plain
+text (the way a Lottie file is, and as easy for an agent to write). `live` draws it on the CPU with resvg/tiny-skia, so it needs **no GPU**,
+is as sharp as the output size allows, and costs about 23 ms a frame at 720x1280 (6 ms at 360x640): the cost follows the pixel count.
+
+```json
+{"width": 720, "height": 1280, "background": "#9fd3f0", "layers": [
+  {"id": "sky",  "src": "svg/sky.svg",  "x": 360, "y": 640, "parallax": 0},
+  {"id": "tree", "src": "svg/tree.svg", "x": 100, "y": 700, "anchor": [0.5, 1], "z": 5,
+   "anim": [{"preset": "sway", "amp": 2.5, "secs": 4, "phase": 0.3}]}
+]}
+```
+
+* A layer: `id`, `src` (a file next to the stage) or inline `svg`, `x` `y` (where its `anchor`, fractions of the picture, default the centre, sits;
+  design units, default 720 x 1280, scaled to the output), `w` `h`, `scale`, `rot` (degrees), `opacity`, `z`, `flip`, `visible`, `blend`
+  (`multiply` `screen` `overlay` `plus` ...), `parallax` (how much the camera moves it: 0 = fixed to the screen).
+* `anim` tracks lie over the layer's own values: `x` `y` `rot` are added, `scale` `opacity` multiply. Presets: `bob` `sway` `pulse` `drift`
+  `blink` `flicker` `spin`; or `from`/`to`, or `keys` (`[[t, value], ...]`, t from 0 to 1); `secs`, `delay`, `phase`, `ease`, `repeat`
+  (`loop`, `pingpong`, `once`).
+* A running show steps the stage with `{"do": "stage", "op": ...}` inside a macro `step`: `set` (any property; numbers glide when `secs` is
+  given, `ease` = `linear` `sine` `in` `out` `in_out` `out_back`; `src` swaps the picture), `add`, `remove`, `pop` (spring in), `camera`
+  (`x` `y` `zoom`), `anim` (replace the tracks). `validate` checks each step and that the layer ids exist (or are added by a macro).
+* Text, bars and emoji are not part of the stage: they stay overlay elements, drawn on top. The same macros, triggers, bots, `POST /vars`
+  and `watch` work as with a 3D diorama.
 
 ## war.json
 

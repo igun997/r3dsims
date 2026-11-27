@@ -107,6 +107,8 @@ Clay look by default (`--style clay`: smooth hand-made figures; `--style voxel` 
 
 **Not only a game.** The same server runs a **studio** (`r3dsims template studio -o studio`): no sides, rounds or winner, only your scene with viewers talking to it. The kampung template turns chat into speech bubbles of the villagers, gifts into effects (a rose is a dance, a galaxy turns night and orbits the camera), likes into a goal bar, and a bot greets when nobody writes. Triggers, macros and bots are the same data as a war's, so any diorama can be a show. See "Shows" in [`docs/LIVE.md`](docs/LIVE.md).
 
+**Vector stage.** A studio's scene can also be **animated SVG layers** (`"layers": [...]`) drawn on the CPU by resvg: crisp at any size and **no GPU needed** (about 23 ms a frame at 720x1280). Pictures are SVG, movement is JSON, and macros move layers (`{"do":"stage","op":"set",...}`), so live data (`POST /vars`) can grow a building or swap a picture. See "A vector stage" in [`docs/LIVE.md`](docs/LIVE.md).
+
 `demo` (citizens vs government), day and night, and the two ultimates seen from the point of view of each camp:
 
 <p align="center">

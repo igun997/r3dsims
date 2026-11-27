@@ -45,6 +45,14 @@ pub trait Show: Send {
     fn set_vars(&mut self, _body: &Value) -> Result<Value> {
         bail!("this show keeps no counters to feed; use a studio")
     }
+    /// a vector stage instead of the GPU diorama: when true `live` draws `render_frame` on the CPU and never opens a GPU
+    fn has_stage(&self) -> bool {
+        false
+    }
+    /// one frame of the stage as packed RGB, `w` x `h` pixels
+    fn render_frame(&mut self, _w: usize, _h: usize) -> Option<Result<Vec<u8>>> {
+        None
+    }
 }
 
 impl Show for War {

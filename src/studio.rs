@@ -41,6 +41,7 @@ use crate::script::{Cond, Ctx, Host, MStep, Runner};
 use crate::show::Show;
 use crate::war::{ActionRef, Bot, Event, Hooks, Trigger, norm, pattern_matches, trigger_name};
 use crate::world::World;
+use crate::stage::{Stage, StageOp, StageStep};
 
 fn yes() -> bool {
     true
@@ -99,6 +100,9 @@ pub struct StudioDef {
     /// run a macro each time this counter (or text) changes: how outside data (`POST /vars`) moves the scene
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch: Vec<Watch>,
+    /// texts that exist from the start (`{text.NAME}`), so a placeholder never shows raw before the first feed arrives
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub texts: BTreeMap<String, String>,
 }
 
 /// A counter or text to watch: when it changes, `macro` runs once (not again while it is still running; the change is
@@ -138,6 +142,7 @@ pub struct Studio {
     warned: Vec<String>,
     texts: BTreeMap<String, String>,
     watch_last: Vec<String>,
+    stage: Option<Stage>,
 }
 
 fn num(n: f64) -> String {
@@ -157,19 +162,37 @@ fn feed_name(k: &str) -> Result<()> {
     Ok(())
 }
 
+/// The 3D world a vector-stage studio carries along: one flat tile, never drawn.
+fn empty_scene() -> crate::world::SceneDef {
+    serde_json::from_value(json!({"name": "stage", "assets": {}, "terrain": {"legend": {"G": {"h": 1, "top": "#000000"}}, "map": ["G"]}, "entities": []})).expect("empty scene")
+}
+
 impl Studio {
-    /// Reads `studio.json` and the scene it names.
+    /// Reads `studio.json` and the scene it names: a 3D diorama (`scene.json`) or a vector stage (a file with `layers`).
     pub fn load(path: &Path) -> Result<(World, Studio)> {
         let txt = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let def: StudioDef = serde_json::from_str(&txt).with_context(|| format!("parse {}", path.display()))?;
         let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut world = World::load(&base.join(&def.scene)).with_context(|| format!("scene {}", def.scene))?;
+        let scene_path = base.join(&def.scene);
+        let scene_txt = std::fs::read_to_string(&scene_path).with_context(|| format!("read scene {}", scene_path.display()))?;
+        let is_stage = serde_json::from_str::<Value>(&scene_txt).is_ok_and(|v| v.get("layers").is_some());
+        if is_stage {
+            let stage = Stage::load(&scene_path).with_context(|| format!("stage {}", def.scene))?;
+            let mut world = World::from_scene(empty_scene(), base)?;
+            let studio = Studio::build(def, &mut world, Some(stage))?;
+            return Ok((world, studio));
+        }
+        let mut world = World::load(&scene_path).with_context(|| format!("scene {}", def.scene))?;
         let studio = Studio::new(def, &mut world)?;
         Ok((world, studio))
     }
 
-    pub fn new(mut def: StudioDef, world: &mut World) -> Result<Studio> {
-        validate(&def, world)?;
+    pub fn new(def: StudioDef, world: &mut World) -> Result<Studio> {
+        Studio::build(def, world, None)
+    }
+
+    fn build(mut def: StudioDef, world: &mut World, stage: Option<Stage>) -> Result<Studio> {
+        validate(&def, world, stage.as_ref())?;
         for t in def.triggers.iter_mut() {
             t.name = trigger_name(t);
         }
@@ -192,8 +215,9 @@ impl Studio {
             goal_hits: 0,
             rng: 0x9E37_79B9_7F4A_7C15,
             warned: vec![],
-            texts: BTreeMap::new(),
+            texts: def.texts.clone(),
             watch_last: vec![],
+            stage,
             def,
         };
         s.watch_last = vec![String::new(); s.def.watch.len()];
@@ -418,7 +442,7 @@ impl Studio {
 
     fn reset(&mut self, world: &mut World) -> Result<()> {
         self.vars = self.def.vars.clone();
-        self.texts.clear();
+        self.texts = self.def.texts.clone();
         self.runners.clear();
         self.overlay.clear();
         self.ticker.clear();
@@ -429,6 +453,9 @@ impl Studio {
         self.goal_target = self.def.goal.as_ref().map_or(0.0, |g| g.target);
         self.goal_hits = 0;
         self.watch_last = vec![String::new(); self.def.watch.len()];
+        if let Some(s) = &mut self.stage {
+            s.reset()?;
+        }
         self.start_scene(world)
     }
 
@@ -504,6 +531,14 @@ impl Host for Studio {
     fn world_step(&mut self, world: &mut World, step: &Value, ctx: &Ctx) {
         let mut step = step.clone();
         interp_value(&mut step, &self.ctx_vars(ctx));
+        if step.get("do").and_then(Value::as_str) == Some("stage") {
+            match self.stage.as_mut().map(|s| s.apply(&step)) {
+                Some(Ok(())) => {}
+                Some(Err(e)) => self.note(format!("stage step: {e:#}")),
+                None => self.note("a `stage` step needs a vector stage as the scene".into()),
+            }
+            return;
+        }
         if let Err(e) = world.run_json(&step.to_string()) {
             self.note(format!("world step: {e:#}"));
         }
@@ -535,6 +570,14 @@ impl Show for Studio {
         self.def.title.clone()
     }
 
+    fn has_stage(&self) -> bool {
+        self.stage.is_some()
+    }
+
+    fn render_frame(&mut self, w: usize, h: usize) -> Option<Result<Vec<u8>>> {
+        self.stage.as_mut().map(|s| s.render(w, h))
+    }
+
     fn update(&mut self, dt: f32, world: &mut World) {
         self.time += dt;
         self.idle += dt;
@@ -548,6 +591,9 @@ impl Show for Studio {
             if b.left <= 0.0 {
                 self.banner = None;
             }
+        }
+        if let Some(s) = &mut self.stage {
+            s.update(dt);
         }
         if self.paused {
             return;
@@ -627,7 +673,7 @@ impl Show for Studio {
         for t in def.triggers.iter_mut() {
             t.name = trigger_name(t);
         }
-        validate(&def, world)?;
+        validate(&def, world, self.stage.as_ref())?;
         self.def = def;
         Ok(json!({"added": added, "removed": removed, "triggers": self.def.triggers.len(), "macros": self.def.macros.len(), "bots": self.def.bots.len()}))
     }
@@ -734,6 +780,7 @@ impl Show for Studio {
         let vars: BTreeMap<&String, f64> = self.vars.iter().map(|(k, v)| (k, *v)).collect();
         json!({
             "kind": "studio",
+            "stage": self.stage.is_some(),
             "mode": "studio",
             "title": self.def.title,
             "phase": self.phase_name(),
@@ -824,6 +871,11 @@ fn collect_spawns(v: &Value, world: &World, ids: &mut std::collections::HashSet<
                     }
                 }
             }
+            if o.get("do").and_then(Value::as_str) == Some("stage") && o.get("op").and_then(Value::as_str) == Some("add") {
+                if let Some(id) = o.get("layer").and_then(|l| l.get("id")).and_then(Value::as_str) {
+                    ids.insert(format!("layer:{id}"));
+                }
+            }
             o.values().for_each(|x| collect_spawns(x, world, ids, errs));
         }
         Value::Array(a) => a.iter().for_each(|x| collect_spawns(x, world, ids, errs)),
@@ -841,7 +893,7 @@ fn numbers_for_placeholders(v: &Value) -> Value {
     }
 }
 
-fn check_steps(steps: &[MStep], def: &StudioDef, known: &dyn Fn(&str) -> bool, ctx: &str, errs: &mut Vec<String>) {
+fn check_steps(steps: &[MStep], def: &StudioDef, known: &dyn Fn(&str) -> bool, layers: Option<&dyn Fn(&str) -> bool>, ctx: &str, errs: &mut Vec<String>) {
     for s in steps {
         match s {
             MStep::Act { .. } => errs.push(format!("{ctx}: `act` fires a game action; a studio uses overlay, step, announce, set and add")),
@@ -850,16 +902,34 @@ fn check_steps(steps: &[MStep], def: &StudioDef, known: &dyn Fn(&str) -> bool, c
                     errs.push(format!("{ctx}: calls unknown macro '{name}'"));
                 }
             }
-            MStep::Repeat { steps, .. } | MStep::Forever { steps } => check_steps(steps, def, known, ctx, errs),
-            MStep::Random { choices } => choices.iter().for_each(|c| check_steps(&c.steps, def, known, ctx, errs)),
+            MStep::Repeat { steps, .. } | MStep::Forever { steps } => check_steps(steps, def, known, layers, ctx, errs),
+            MStep::Random { choices } => choices.iter().for_each(|c| check_steps(&c.steps, def, known, layers, ctx, errs)),
             MStep::If { cond, then, otherwise } => {
                 check_cond(cond, ctx, errs);
-                check_steps(then, def, known, ctx, errs);
-                check_steps(otherwise, def, known, ctx, errs);
+                check_steps(then, def, known, layers, ctx, errs);
+                check_steps(otherwise, def, known, layers, ctx, errs);
             }
             MStep::Until { cond, .. } => check_cond(cond, ctx, errs),
             MStep::Step { step } => {
                 let probe = numbers_for_placeholders(step);
+                if probe.get("do").and_then(Value::as_str) == Some("stage") {
+                    match (layers, serde_json::from_value::<StageStep>(probe)) {
+                        (None, _) => errs.push(format!("{ctx}: a `stage` step needs a vector stage as the scene (this studio has a 3D diorama)")),
+                        (Some(_), Err(e)) => errs.push(format!("{ctx}: {step}: {e}")),
+                        (Some(layer_known), Ok(StageStep::Stage(op))) => {
+                            let id = match &op {
+                                StageOp::Remove { id } | StageOp::Set { id, .. } | StageOp::Pop { id, .. } | StageOp::Anim { id, .. } => Some(id.as_str()),
+                                _ => None,
+                            };
+                            if let Some(id) = id {
+                                if !id.contains('{') && !layer_known(id) {
+                                    errs.push(format!("{ctx}: unknown layer '{id}' (a layer of the stage, or one a macro adds)"));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let ok = serde_json::from_value::<crate::story::Step>(probe.clone()).is_ok() || serde_json::from_value::<crate::camera::CameraCmd>(probe).is_ok();
                 if !ok {
                     errs.push(format!("{ctx}: {step} is not a story or camera step"));
@@ -871,7 +941,7 @@ fn check_steps(steps: &[MStep], def: &StudioDef, known: &dyn Fn(&str) -> bool, c
     }
 }
 
-fn validate(def: &StudioDef, world: &World) -> Result<()> {
+fn validate(def: &StudioDef, world: &World, stage: Option<&Stage>) -> Result<()> {
     let mut errs: Vec<String> = vec![];
     for t in &def.triggers {
         let n = trigger_name(t);
@@ -889,8 +959,11 @@ fn validate(def: &StudioDef, world: &World) -> Result<()> {
         collect_spawns(&serde_json::to_value(steps).unwrap_or(Value::Null), world, &mut spawned, &mut errs);
     }
     let known = |a: &str| world.entity_idx(a).is_some() || spawned.contains(a);
+    let stage_ids: std::collections::HashSet<String> = stage.map(|s| s.ids().into_iter().collect()).unwrap_or_default();
+    let layer_known = |a: &str| stage_ids.contains(a) || spawned.contains(&format!("layer:{a}"));
+    let layers: Option<&dyn Fn(&str) -> bool> = stage.map(|_| &layer_known as &dyn Fn(&str) -> bool);
     for (name, steps) in &def.macros {
-        check_steps(steps, def, &known, &format!("macro '{name}'"), &mut errs);
+        check_steps(steps, def, &known, layers, &format!("macro '{name}'"), &mut errs);
     }
     for b in &def.bots {
         if !def.macros.contains_key(&b.macro_) {

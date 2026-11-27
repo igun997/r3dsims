@@ -245,3 +245,141 @@ fn the_live_server_streams_a_studio_with_the_same_endpoints() {
     let st = runner.join().unwrap().unwrap();
     assert!(st["time"].as_f64().unwrap() >= 5.0);
 }
+
+/// A project with a vector stage: a sky, a swaying tree, and macros that move and add layers.
+fn stage_project(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("r3d_stage_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("svg")).unwrap();
+    let rect = |c: &str| format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="{c}"/></svg>"#);
+    std::fs::write(dir.join("svg/red.svg"), rect("#ff0000")).unwrap();
+    std::fs::write(dir.join("svg/green.svg"), rect("#00ff00")).unwrap();
+    std::fs::write(
+        dir.join("stage.json"),
+        json!({"width": 360, "height": 640, "background": "#102030", "layers": [
+            {"id": "box", "src": "svg/red.svg", "x": 60, "y": 100, "anim": [{"preset": "sway", "amp": 4, "secs": 3}]},
+            {"id": "far", "src": "svg/red.svg", "x": 300, "y": 600, "parallax": 0}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("studio.json"),
+        json!({
+            "title": "PANGGUNG", "scene": "stage.json", "hud": false,
+            "vars": {"x": 60},
+            "triggers": [{"on": "like", "macro": "geser"}, {"on": "comment", "macro": "tambah"}],
+            "macros": {
+                "geser": [{"do": "step", "step": {"do": "stage", "op": "set", "id": "box", "props": {"x": "={var.x}"}, "secs": 0}}],
+                "tambah": [
+                    {"do": "step", "step": {"do": "stage", "op": "add", "layer": {"id": "baru", "src": "svg/green.svg", "x": 200, "y": 300}}},
+                    {"do": "step", "step": {"do": "stage", "op": "pop", "id": "baru", "secs": 0.2}}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    dir
+}
+
+fn frame_px(show: &mut dyn Show, w: usize, h: usize, x: usize, y: usize) -> [u8; 3] {
+    let f = show.render_frame(w, h).expect("a stage draws frames").unwrap();
+    let i = (y * w + x) * 3;
+    [f[i], f[i + 1], f[i + 2]]
+}
+
+#[test]
+fn a_studio_can_draw_a_vector_stage_without_a_gpu() {
+    let dir = stage_project("draw");
+    let (mut world, mut show) = load_show(&dir.join("studio.json")).expect("a stage studio loads and validates");
+    assert!(show.has_stage());
+    assert_eq!(show.state_json()["stage"], json!(true));
+    // 360x640 design drawn at 720x1280: the box (60,100) is at (120,200); the background is the stage's colour
+    assert_eq!(frame_px(show.as_mut(), 720, 1280, 120, 200), [255, 0, 0]);
+    assert_eq!(frame_px(show.as_mut(), 720, 1280, 400, 800), [0x10, 0x20, 0x30]);
+
+    // a macro adds a layer, which springs in
+    show.handle_event(&mut world, ev("comment", "Ani", "", 1, "halo"));
+    sim(show.as_mut(), &mut world, 1.0);
+    assert_eq!(frame_px(show.as_mut(), 720, 1280, 400, 600), [0, 255, 0], "the new layer at (200,300) -> (400,600)");
+
+    // a fed counter moves a layer: \"={var.x}\" became a number
+    show.set_vars(&json!({"set": {"x": 200}})).unwrap();
+    show.handle_event(&mut world, ev("like", "Ani", "", 1, ""));
+    sim(show.as_mut(), &mut world, 0.2);
+    let moved = frame_px(show.as_mut(), 720, 1280, 400, 200);
+    assert!(moved[0] > 200 && moved[1] < 80, "the red box moved to x=200: {moved:?}");
+    assert_eq!(frame_px(show.as_mut(), 720, 1280, 40, 200), [0x10, 0x20, 0x30], "and left its old place");
+    // reset puts the stage back
+    show.control(&mut world, "reset").unwrap();
+    assert_eq!(frame_px(show.as_mut(), 720, 1280, 120, 200), [255, 0, 0]);
+}
+
+#[test]
+fn stage_steps_are_checked_when_the_file_is_loaded() {
+    let dir = stage_project("checks");
+    let path = dir.join("studio.json");
+    let load_with = |macros: Value| {
+        let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        v["macros"]["extra"] = macros;
+        std::fs::write(&path, v.to_string()).unwrap();
+        load_show(&path).err().map(|e| format!("{e:#}")).unwrap_or_default()
+    };
+    let err = load_with(json!([{"do": "step", "step": {"do": "stage", "op": "set", "id": "tidak_ada", "props": {"x": 1}}}]));
+    assert!(err.contains("tidak_ada"), "{err}");
+    let err = load_with(json!([{"do": "step", "step": {"do": "stage", "op": "set", "id": "box", "props": {"x": 1}, "colour": 3}}]));
+    assert_eq!(err, "", "extra fields are tolerated like everywhere else");
+    let err = load_with(json!([{"do": "step", "step": {"do": "stage", "op": "teleport", "id": "box"}}]));
+    assert!(err.contains("teleport") || err.contains("variant"), "{err}");
+    // a layer a macro adds is known to later steps
+    let err = load_with(json!([
+        {"do": "step", "step": {"do": "stage", "op": "add", "layer": {"id": "lahir", "svg": "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>"}}},
+        {"do": "step", "step": {"do": "stage", "op": "remove", "id": "lahir"}}
+    ]));
+    assert_eq!(err, "");
+    // a 3D studio refuses stage steps
+    let kampung = project("nostage");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(kampung.join("studio.json")).unwrap()).unwrap();
+    v["macros"]["extra"] = json!([{"do": "step", "step": {"do": "stage", "op": "remove", "id": "x"}}]);
+    std::fs::write(kampung.join("studio.json"), v.to_string()).unwrap();
+    let err = load_show(&kampung.join("studio.json")).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    assert!(err.contains("vector stage"), "{err}");
+}
+
+#[test]
+fn the_live_server_streams_a_stage_with_no_gpu() {
+    let dir = stage_project("live");
+    let mut o = opts(&dir);
+    o.show = dir.join("studio.json");
+    o.history = None;
+    let live = Live::start(o).unwrap();
+    let addr = live.addr().to_string();
+    let runner = std::thread::spawn(move || live.run());
+    let c = Client::new(&format!("http://{addr}"), None).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(900));
+    let state: Value = serde_json::from_str(&c.get("/state").unwrap()).unwrap();
+    assert_eq!(state["stage"], json!(true));
+    let (code, jpg) = c.request_bytes("GET", "/frame.jpg", None).unwrap();
+    assert_eq!(code, 200);
+    assert!(jpg.len() > 500 && jpg.starts_with(&[0xFF, 0xD8]));
+    let st = runner.join().unwrap().unwrap();
+    assert!(st["time"].as_f64().unwrap() >= 5.0);
+}
+
+#[test]
+fn texts_exist_from_the_start_and_come_back_on_reset() {
+    let dir = stage_project("texts");
+    let path = dir.join("studio.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    v["texts"] = json!({"nama1": "", "kota": "Jakarta"});
+    std::fs::write(&path, v.to_string()).unwrap();
+    let (mut world, mut show) = load_show(&path).unwrap();
+    assert_eq!(show.vars()["text.kota"], "Jakarta", "a placeholder has a value before any feed");
+    assert_eq!(show.vars()["text.nama1"], "");
+    show.set_vars(&json!({"text": {"kota": "Bandung", "baru": "x"}})).unwrap();
+    assert_eq!(show.vars()["text.kota"], "Bandung");
+    show.control(&mut world, "reset").unwrap();
+    assert_eq!(show.vars()["text.kota"], "Jakarta");
+    assert!(!show.vars().contains_key("text.baru"), "reset drops what the feed added");
+}

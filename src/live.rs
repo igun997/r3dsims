@@ -376,7 +376,7 @@ impl Live {
     pub fn start(opts: LiveOpts) -> Result<Live> {
         let (mut world, show) = load_show(&opts.show)?;
         world.clay = opts.clay;
-        if opts.out_h > opts.out_w {
+        if opts.out_h > opts.out_w && !show.has_stage() {
             // a vertical picture (TikTok): the scene camera was authored for a wide one
             let t = &world.terrain;
             let (yaw, pitch, zoom) = portrait_camera(t.w as f32 * t.cell, t.d as f32 * t.cell, opts.out_w as f32 / opts.out_h as f32);
@@ -513,9 +513,13 @@ impl Live {
         let (ow, oh) = (self.opts.out_w as usize, self.opts.out_h as usize);
         let pixel = self.opts.pixel.max(1) as usize;
         let (rw, rh) = ((ow / pixel).max(16), (oh / pixel).max(16));
-        let gpu = Gpu::headless()?;
-        eprintln!("gpu: {}", gpu.adapter);
-        let mut renderer = SceneRenderer::new(&gpu.device, &gpu.queue, rw as u32, rh as u32);
+        let stage_mode = self.show.has_stage();
+        let gpu = if stage_mode { None } else { Some(Gpu::headless()?) };
+        match &gpu {
+            Some(g) => eprintln!("gpu: {}", g.adapter),
+            None => eprintln!("stage: vector layers drawn on the CPU, no GPU needed"),
+        }
+        let mut renderer = gpu.as_ref().map(|g| SceneRenderer::new(&g.device, &g.queue, rw as u32, rh as u32));
         let mut comp = Compositor::new(self.base_dir.clone(), self.opts.emoji_dir.clone());
         if let Some(t) = self.opts.out.clone() {
             self.output.start(&t, self.opts.bitrate_k)?;
@@ -565,10 +569,19 @@ impl Live {
             sim += dt;
 
             let t0 = Instant::now();
-            let low = renderer.render_rgb(&self.world)?;
-            let t1 = Instant::now();
-            let mut frame = upscale_nearest(&low, rw, rh, ow, oh);
-            let t2 = Instant::now();
+            let (mut frame, t1, t2) = match self.show.render_frame(ow, oh) {
+                Some(f) => {
+                    let f = f?;
+                    let t = Instant::now();
+                    (f, t, t)
+                }
+                None => {
+                    let r = renderer.as_mut().ok_or_else(|| anyhow!("this show draws no stage and there is no GPU renderer"))?;
+                    let low = r.render_rgb(&self.world)?;
+                    let t1 = Instant::now();
+                    (upscale_nearest(&low, rw, rh, ow, oh), t1, Instant::now())
+                }
+            };
             let vars = self.show.vars();
             let hud_items = self.show.hud(ow, oh);
             let mut items: Vec<Drawable> = hud_items.iter().map(|(e, age, left)| Drawable { el: e, age: *age, left: *left }).collect();

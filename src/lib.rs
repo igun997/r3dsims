@@ -36,6 +36,7 @@ pub mod templates;
 pub mod live;
 pub mod show;
 pub mod studio;
+pub mod stage;
 pub mod output;
 pub mod tiktok;
 pub mod overlay;

@@ -77,6 +77,8 @@ JSON
 
 **Live data (not only viewers):** a studio takes numbers and texts from your own program: `r3dsims vars '{"set":{"lv1":3},"add":{"n":1},"text":{"nama1":"Al-Hidayah"}}'` (or `POST /vars`, token needed; a bad entry applies nothing). Show them with `{var.NAME}` / `{text.NAME}`; `"watch":[{"var":"ver1","macro":"pasang1"}]` runs a macro when that value changes (never lost: it runs again once the macro is idle); a whole string `"={var.x}"` in a `step` becomes a number (`pos`, `scale`); a `spawn` step may use any scene asset and `validate` knows the ids it spawns. Worked example (race of pesantren, prayer-time mood, bridge from an API): the separate `jaringan-ponpes` repo.
 
+**Vector stage (animated SVG, no GPU, sharper than the 3D look):** a studio's `scene` can be a file with `layers` instead of terrain: `{"width":720,"height":1280,"background":"#9fd3f0","layers":[{"id":"tree","src":"svg/tree.svg","x":100,"y":700,"anchor":[0.5,1],"z":5,"anim":[{"preset":"sway","amp":2.5,"secs":4}]}]}`. Pictures are SVG files, movement is JSON (`anim` presets `bob sway pulse drift blink flicker spin`, or `from/to`, or `keys`; layer `blend` `multiply`/`plus`, `parallax`). A macro `step` moves it: `{"do":"stage","op":"set","id":"p1","props":{"src":"svg/gold.svg","scale":"={var.skala1}"},"secs":0.6,"ease":"out_back"}` · `add` · `remove` · `pop` · `camera` · `anim`. Drawn on the CPU (about 23 ms at 720x1280); `validate` checks steps and layer ids. Full example with generator: the `jaringan-ponpes` repo (`tools/build_show.py`). Text, bars and emoji stay overlay elements on top.
+
 ## Make a new world (any theme)
 
 Copy `perang` or `demo`: change `sides` (names, colours, objective entity, spawn, zone), `units` (assets; `structure`
